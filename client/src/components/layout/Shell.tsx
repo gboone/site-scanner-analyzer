@@ -1,0 +1,103 @@
+import React from 'react';
+import type { View } from '../../App';
+import { useImport } from '../../hooks/useSites';
+import { useDropzone } from 'react-dropzone';
+
+interface ShellProps {
+  currentView: View;
+  onNavigate: (view: View) => void;
+  children: React.ReactNode;
+}
+
+const NAV_ITEMS: Array<{ id: View; label: string; icon: string }> = [
+  { id: 'explorer', label: 'Explorer', icon: '🔍' },
+  { id: 'sql', label: 'SQL Query', icon: '💾' },
+  { id: 'dashboard', label: 'Dashboard', icon: '📊' },
+  { id: 'settings', label: 'Settings', icon: '⚙️' },
+];
+
+export default function Shell({ currentView, onNavigate, children }: ShellProps) {
+  const importMutation = useImport();
+  const [importStatus, setImportStatus] = React.useState<string | null>(null);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    accept: { 'application/json': ['.json'] },
+    noClick: true,
+    onDrop: async (files) => {
+      const file = files[0];
+      if (!file) return;
+      setImportStatus(`Loading ${file.name}...`);
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const sites = Array.isArray(data) ? data : data.results || data.data || [];
+        const result = await importMutation.mutateAsync(sites) as any;
+        setImportStatus(`✓ Imported: ${result.inserted} new, ${result.updated} updated`);
+        setTimeout(() => setImportStatus(null), 5000);
+      } catch (err: any) {
+        setImportStatus(`✗ Import failed: ${err.message}`);
+        setTimeout(() => setImportStatus(null), 8000);
+      }
+    },
+  });
+
+  return (
+    <div {...getRootProps()} className="flex h-screen overflow-hidden bg-gray-50">
+      <input {...getInputProps()} />
+
+      {/* Drop overlay */}
+      {isDragActive && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-gov-blue/20 border-4 border-dashed border-gov-blue">
+          <div className="bg-white rounded-xl p-8 text-center shadow-2xl">
+            <div className="text-4xl mb-3">📂</div>
+            <div className="text-xl font-semibold text-gov-blue">Drop JSON file to import</div>
+          </div>
+        </div>
+      )}
+
+      {/* Sidebar */}
+      <aside className="w-48 flex-shrink-0 bg-gov-blue-dark text-white flex flex-col">
+        <div className="p-4 border-b border-white/20">
+          <div className="font-bold text-sm leading-tight">GSA Site Scanner</div>
+          <div className="text-white/60 text-xs">Analyzer</div>
+        </div>
+        <nav className="flex-1 py-2">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onNavigate(item.id)}
+              className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left transition-colors ${
+                currentView === item.id
+                  ? 'bg-white/20 text-white font-medium'
+                  : 'text-white/70 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <span>{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="p-3 border-t border-white/20 text-xs text-white/50">
+          Drop JSON to import
+        </div>
+      </aside>
+
+      {/* Main */}
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Import status toast */}
+        {importStatus && (
+          <div className={`px-4 py-2 text-sm font-medium ${
+            importStatus.startsWith('✓') ? 'bg-green-50 text-green-800 border-b border-green-200' :
+            importStatus.startsWith('✗') ? 'bg-red-50 text-red-800 border-b border-red-200' :
+            'bg-blue-50 text-blue-800 border-b border-blue-200'
+          }`}>
+            {importStatus}
+          </div>
+        )}
+        <div className="flex-1 overflow-hidden">
+          {children}
+        </div>
+      </main>
+    </div>
+  );
+}

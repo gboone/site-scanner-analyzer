@@ -1,0 +1,31 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "drizzle-orm": "^0.40.0",
+    "express": "^4.21.2",
+    "ipaddr.js": "^2.2.0",
+    "node-fetch": "^3.3.2",
+    "shared": "*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.1",
+    "drizzle-kit": "^0.30.4",
+    "tsx": "4.7.3",
+    "typescript": "^5.4.5"
+  }
+}
