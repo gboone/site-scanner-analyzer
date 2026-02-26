@@ -19,6 +19,7 @@ export default function Pagination({ page, pages, total, limit, onPage }: Pagina
         <button
           onClick={() => onPage(1)}
           disabled={page === 1}
+          aria-label="First page"
           className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50 transition-colors"
         >
           «
@@ -26,16 +27,18 @@ export default function Pagination({ page, pages, total, limit, onPage }: Pagina
         <button
           onClick={() => onPage(page - 1)}
           disabled={page === 1}
+          aria-label="Previous page"
           className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50 transition-colors"
         >
           ‹
         </button>
-        <span className="px-2">
+        <span className="px-2" aria-live="polite" aria-atomic="true">
           Page {page} of {pages || 1}
         </span>
         <button
           onClick={() => onPage(page + 1)}
           disabled={page >= pages}
+          aria-label="Next page"
           className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50 transition-colors"
         >
           ›
@@ -43,6 +46,7 @@ export default function Pagination({ page, pages, total, limit, onPage }: Pagina
         <button
           onClick={() => onPage(pages)}
           disabled={page >= pages}
+          aria-label="Last page"
           className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50 transition-colors"
         >
           »

@@ -208,10 +208,11 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
+                aria-label="Close dialog"
                 className="text-gray-400 hover:text-gray-600 text-xl leading-none disabled:opacity-40"
                 disabled={progress.running}
               >
-                ×
+                <span aria-hidden="true">×</span>
               </button>
             </Dialog.Close>
           </div>
@@ -234,11 +235,14 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
                 }`}
               >
                 <input {...getInputProps()} />
+                <label htmlFor="domain-import-textarea" className="sr-only">Domains to import (one per line or comma-separated)</label>
                 <textarea
+                  id="domain-import-textarea"
                   value={raw}
                   onChange={(e) => setRaw(e.target.value)}
                   disabled={progress.running}
                   rows={8}
+                  aria-describedby="domain-import-description"
                   placeholder={'ct.gov\nkansas.gov\nhhs.gov, va.gov'}
                   className="w-full p-3 text-xs font-mono bg-transparent resize-none focus:outline-none disabled:opacity-50 rounded-lg"
                 />
@@ -270,7 +274,7 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
 
             {/* Scan progress */}
             {(progress.running || isDone) && (
-              <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-2">
+              <div role="status" aria-live="polite" aria-atomic="false" className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-gray-700">
                     {progress.running ? 'Scanning…' : '✓ Complete'}
@@ -284,7 +288,14 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
                 </div>
 
                 {/* Progress bar */}
-                <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={progress.total}
+                  aria-valuenow={completedCount}
+                  aria-label={`Scan progress: ${completedCount} of ${progress.total}`}
+                  className="h-1.5 bg-gray-200 rounded-full overflow-hidden"
+                >
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${
                       isDone && progress.failed > 0 ? 'bg-yellow-400' : 'bg-gov-blue'

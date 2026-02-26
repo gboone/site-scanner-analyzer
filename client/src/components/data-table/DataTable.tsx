@@ -74,9 +74,9 @@ export function DataTable<T>({
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-48 text-gray-400">
+      <div className="flex items-center justify-center h-48 text-gray-400" aria-live="polite" aria-busy="true">
         <div className="text-center">
-          <div className="animate-spin text-2xl mb-2">⟳</div>
+          <div className="animate-spin text-2xl mb-2" aria-hidden="true">⟳</div>
           <div>Loading…</div>
         </div>
       </div>
@@ -102,14 +102,14 @@ export function DataTable<T>({
           {table.getHeaderGroups().map((hg) => (
             <tr key={hg.id} className="bg-gray-100 border-b border-gray-200">
               {selectable && (
-                <th className="px-2 py-2 w-8 text-center">
+                <th scope="col" className="px-2 py-2 w-8 text-center">
                   <input
                     type="checkbox"
                     checked={allChecked}
                     ref={(el) => { if (el) el.indeterminate = someChecked; }}
                     onChange={() => onToggleAll?.(pageKeys)}
                     className="cursor-pointer accent-gov-blue"
-                    title={allChecked ? 'Deselect all on page' : 'Select all on page'}
+                    aria-label={allChecked ? 'Deselect all on page' : 'Select all on page'}
                   />
                 </th>
               )}
@@ -123,17 +123,23 @@ export function DataTable<T>({
                       onSortChange(colId, newOrder);
                     }
                   : undefined;
+                // aria-sort: "ascending" | "descending" | "none" | "other"
+                const ariaSort = isSorted
+                  ? sortOrder === 'asc' ? 'ascending' : 'descending'
+                  : (onSortChange ? 'none' : undefined);
                 return (
                   <th
                     key={header.id}
+                    scope="col"
+                    aria-sort={ariaSort as React.AriaAttributes['aria-sort']}
                     className={`px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap select-none hover:bg-gray-200 transition-colors ${onSortChange ? 'cursor-pointer' : ''}`}
                     style={{ width: header.getSize() }}
                     onClick={handleHeaderClick}
                   >
                     <div className="flex items-center gap-1">
                       {flexRender(header.column.columnDef.header, header.getContext())}
-                      {isSorted && sortOrder === 'asc' && <span className="text-gov-blue">↑</span>}
-                      {isSorted && sortOrder === 'desc' && <span className="text-gov-blue">↓</span>}
+                      {isSorted && sortOrder === 'asc' && <span className="text-gov-blue" aria-hidden="true">↑</span>}
+                      {isSorted && sortOrder === 'desc' && <span className="text-gov-blue" aria-hidden="true">↓</span>}
                     </div>
                   </th>
                 );
@@ -156,6 +162,7 @@ export function DataTable<T>({
               return (
                 <tr
                   key={row.id}
+                  aria-selected={isBulkSelected || isSingleSelected || undefined}
                   className={`border-b border-gray-100 cursor-pointer transition-colors ${
                     isBulkSelected
                       ? 'bg-blue-50 hover:bg-blue-100'
@@ -172,6 +179,7 @@ export function DataTable<T>({
                         checked={isBulkSelected}
                         onChange={() => onToggleRow?.(key)}
                         onClick={(e) => e.stopPropagation()}
+                        aria-label={`${isBulkSelected ? 'Deselect' : 'Select'} ${key}`}
                         className="cursor-pointer accent-gov-blue"
                       />
                     </td>

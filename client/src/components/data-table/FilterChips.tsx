@@ -61,40 +61,45 @@ export default function FilterChips({ onFilter }: FilterChipsProps) {
   const hasFilters = Object.keys(activeFilters).length > 0 || search;
 
   return (
-    <div className="flex items-center gap-2 flex-wrap py-2 px-4 bg-white border-b border-gray-200">
+    <div className="flex items-center gap-2 flex-wrap py-2 px-4 bg-white border-b border-gray-200" role="search">
+      <label htmlFor="site-search" className="sr-only">Search domain, agency, or bureau</label>
       <input
+        id="site-search"
         ref={searchRef}
-        type="text"
+        type="search"
         placeholder="Search domain, agency, bureau… (⌘K)"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         className="border border-gray-300 rounded px-2.5 py-1 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-gov-blue"
       />
 
-      <div className="h-4 w-px bg-gray-200" />
+      <div className="h-4 w-px bg-gray-200" role="separator" aria-hidden="true" />
 
-      {CHIPS.map((chip) => {
-        const isActive = activeFilters[chip.key] === chip.value;
-        const colors = COLOR_MAP[chip.color];
-        return (
-          <button
-            key={chip.key}
-            onClick={() => handleChip(chip.key, chip.value)}
-            className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${
-              isActive ? colors.active : colors.inactive
-            }`}
-          >
-            {chip.label}
-          </button>
-        );
-      })}
+      <div role="group" aria-label="Quick filters">
+        {CHIPS.map((chip) => {
+          const isActive = activeFilters[chip.key] === chip.value;
+          const colors = COLOR_MAP[chip.color];
+          return (
+            <button
+              key={chip.key}
+              onClick={() => handleChip(chip.key, chip.value)}
+              aria-pressed={isActive}
+              className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors mr-1 ${
+                isActive ? colors.active : colors.inactive
+              }`}
+            >
+              {chip.label}
+            </button>
+          );
+        })}
+      </div>
 
       {hasFilters && (
         <button
           onClick={() => { clearFilters(); setSearch(''); }}
           className="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 underline"
         >
-          Clear
+          Clear filters
         </button>
       )}
     </div>

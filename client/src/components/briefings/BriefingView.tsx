@@ -38,8 +38,8 @@ export default function BriefingView({ briefing }: BriefingViewProps) {
           )}
         </div>
         <div className="flex gap-1.5">
-          <button onClick={handleExport} className="btn-secondary text-xs">↓ Markdown</button>
-          <button onClick={handlePrint} className="btn-secondary text-xs no-print">🖨 Print</button>
+          <button onClick={handleExport} className="btn-secondary text-xs"><span aria-hidden="true">↓ </span>Markdown</button>
+          <button onClick={handlePrint} className="btn-secondary text-xs no-print"><span aria-hidden="true">🖨 </span>Print</button>
         </div>
       </div>
 
@@ -50,8 +50,12 @@ export default function BriefingView({ briefing }: BriefingViewProps) {
           <div className="space-y-1.5">
             {refs.map((ref: any, i: number) => (
               <div key={i} className="flex items-start gap-2 text-xs">
-                <span className={ref.verified ? 'text-green-500' : 'text-yellow-500'} title={ref.verified ? 'Verified' : 'Could not verify'}>
-                  {ref.verified ? '✓' : '⚠'}
+                <span
+                  className={ref.verified ? 'text-green-500' : 'text-yellow-500'}
+                  aria-label={ref.verified ? 'Verified' : 'Could not verify'}
+                  role="img"
+                >
+                  <span aria-hidden="true">{ref.verified ? '✓' : '⚠'}</span>
                 </span>
                 <div className="min-w-0">
                   <a

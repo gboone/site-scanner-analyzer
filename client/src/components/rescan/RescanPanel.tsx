@@ -131,7 +131,8 @@ export default function RescanPanel({ domain, site }: RescanPanelProps) {
           disabled={scanning}
           className="btn-primary text-xs"
         >
-          {scanning ? '⟳ Scanning…' : '🔄 Re-scan'}
+          <span aria-hidden="true">{scanning ? '⟳ ' : '🔄 '}</span>
+          {scanning ? 'Scanning…' : 'Re-scan'}
         </button>
       </div>
 

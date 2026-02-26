@@ -36,10 +36,11 @@ export default function ColumnToggle({ table }: ColumnToggleProps) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="true"
         className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 transition-colors"
-        title="Toggle columns"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
           <rect x="1" y="3" width="14" height="2" rx="1"/>
           <rect x="1" y="7" width="10" height="2" rx="1"/>
           <rect x="1" y="11" width="12" height="2" rx="1"/>

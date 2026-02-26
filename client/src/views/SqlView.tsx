@@ -51,16 +51,19 @@ export default function SqlView() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowSamples(!showSamples)}
+              aria-expanded={showSamples}
+              aria-controls="sql-samples-panel"
               className="text-xs text-gray-400 hover:text-gray-200 border border-gray-600 rounded px-2 py-1"
             >
-              Samples {showSamples ? '▲' : '▼'}
+              Samples <span aria-hidden="true">{showSamples ? '▲' : '▼'}</span>
             </button>
             <button
               onClick={handleRun}
               disabled={mutation.isPending}
               className="btn-primary text-xs"
             >
-              {mutation.isPending ? '⟳ Running…' : '▶ Run (⌘↵)'}
+              <span aria-hidden="true">{mutation.isPending ? '⟳ ' : '▶ '}</span>
+              {mutation.isPending ? 'Running…' : 'Run (⌘↵)'}
             </button>
           </div>
         </div>
@@ -68,14 +71,14 @@ export default function SqlView() {
         <SqlEditor value={sql} onChange={setSql} onRun={handleRun} />
 
         {mutation.isError && (
-          <div className="text-red-400 text-xs bg-red-900/30 rounded p-2 font-mono">
+          <div role="alert" className="text-red-400 text-xs bg-red-900/30 rounded p-2 font-mono">
             {mutation.error?.message}
           </div>
         )}
 
         {/* Sample queries */}
         {showSamples && (
-          <div className="bg-gray-800 rounded-lg p-3 max-h-48 overflow-y-auto">
+          <div id="sql-samples-panel" className="bg-gray-800 rounded-lg p-3 max-h-48 overflow-y-auto">
             <div className="text-xs text-gray-400 font-medium mb-2">Sample Queries</div>
             <div className="space-y-1">
               {SAMPLE_QUERIES.map((q) => (

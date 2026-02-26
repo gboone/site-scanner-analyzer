@@ -38,11 +38,12 @@ function SettingField({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder={placeholder}
+              aria-label={label}
               className="flex-1 border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gov-blue"
               autoFocus
             />
-            <button onClick={() => { onSave(draft); setEditing(false); }} className="btn-primary text-xs">Save</button>
-            <button onClick={() => { setDraft(value); setEditing(false); }} className="btn-secondary text-xs">Cancel</button>
+            <button onClick={() => { onSave(draft); setEditing(false); }} aria-label={`Save ${label}`} className="btn-primary text-xs">Save</button>
+            <button onClick={() => { setDraft(value); setEditing(false); }} aria-label={`Cancel editing ${label}`} className="btn-secondary text-xs">Cancel</button>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -183,7 +184,9 @@ export default function SettingsView() {
             Optionally filter by agency name (e.g. <code className="bg-gray-100 px-1 rounded">Department of Veterans Affairs</code>).
           </div>
           <div className="flex gap-2 items-center">
+            <label htmlFor="gsa-agency-filter" className="sr-only">Agency filter for GSA import (optional)</label>
             <input
+              id="gsa-agency-filter"
               type="text"
               value={gsaAgency}
               onChange={(e) => setGsaAgency(e.target.value)}

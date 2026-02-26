@@ -43,57 +43,69 @@ export default function Shell({ currentView, onNavigate, children }: ShellProps)
 
   return (
     <div {...getRootProps()} className="flex h-screen overflow-hidden bg-gray-50">
+      {/* Skip navigation */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-white focus:text-gov-blue focus:font-medium focus:rounded focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-gov-blue"
+      >
+        Skip to main content
+      </a>
+
       <input {...getInputProps()} />
 
       {/* Drop overlay */}
       {isDragActive && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-gov-blue/20 border-4 border-dashed border-gov-blue">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-gov-blue/20 border-4 border-dashed border-gov-blue" aria-live="assertive" aria-atomic="true">
           <div className="bg-white rounded-xl p-8 text-center shadow-2xl">
-            <div className="text-4xl mb-3">📂</div>
+            <div className="text-4xl mb-3" aria-hidden="true">📂</div>
             <div className="text-xl font-semibold text-gov-blue">Drop JSON file to import</div>
           </div>
         </div>
       )}
 
       {/* Sidebar */}
-      <aside className="w-48 flex-shrink-0 bg-gov-blue-dark text-white flex flex-col">
+      <aside className="w-48 flex-shrink-0 bg-gov-blue-dark text-white flex flex-col" aria-label="Main navigation">
         <div className="p-4 border-b border-white/20">
           <div className="font-bold text-sm leading-tight">GSA Site Scanner</div>
           <div className="text-white/60 text-xs">Analyzer</div>
         </div>
-        <nav className="flex-1 py-2">
+        <nav className="flex-1 py-2" aria-label="Views">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
+              aria-current={currentView === item.id ? 'page' : undefined}
               className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left transition-colors ${
                 currentView === item.id
                   ? 'bg-white/20 text-white font-medium'
                   : 'text-white/70 hover:bg-white/10 hover:text-white'
               }`}
             >
-              <span>{item.icon}</span>
+              <span aria-hidden="true">{item.icon}</span>
               <span>{item.label}</span>
             </button>
           ))}
         </nav>
-        <div className="p-3 border-t border-white/20 text-xs text-white/50">
+        <div className="p-3 border-t border-white/20 text-xs text-white/50" aria-hidden="true">
           Drop JSON to import
         </div>
       </aside>
 
       {/* Main */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main id="main-content" className="flex-1 flex flex-col overflow-hidden">
         {/* Import status toast */}
-        {importStatus && (
-          <div className={`px-4 py-2 text-sm font-medium ${
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className={importStatus ? `px-4 py-2 text-sm font-medium ${
             importStatus.startsWith('✓') ? 'bg-green-50 text-green-800 border-b border-green-200' :
             importStatus.startsWith('✗') ? 'bg-red-50 text-red-800 border-b border-red-200' :
             'bg-blue-50 text-blue-800 border-b border-blue-200'
-          }`}>
-            {importStatus}
-          </div>
-        )}
+          }` : 'sr-only'}
+        >
+          {importStatus ?? ''}
+        </div>
         <div className="flex-1 overflow-hidden">
           {children}
         </div>

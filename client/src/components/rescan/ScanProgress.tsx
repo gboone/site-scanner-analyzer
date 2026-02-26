@@ -150,7 +150,7 @@ export default function ScanProgress({ progress }: { progress: ProgressState }) 
       })}
 
       {progress.error && (
-        <div className="mt-2 text-red-600 bg-red-50 rounded p-2">{progress.error}</div>
+        <div role="alert" className="mt-2 text-red-600 bg-red-50 rounded p-2">{progress.error}</div>
       )}
 
       {progress.result && progress.step === 'done' && (

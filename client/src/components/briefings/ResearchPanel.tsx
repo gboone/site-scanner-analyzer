@@ -28,39 +28,46 @@ export default function ResearchPanel({ domain, briefings }: ResearchPanelProps)
       <div className="p-4 space-y-3">
         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Generate Briefing</div>
 
-        <div className="flex gap-2">
+        <div role="group" aria-label="Briefing provider" className="flex gap-2">
           {(['glean', 'claude'] as const).map((p) => (
             <button
               key={p}
               onClick={() => setProvider(p)}
+              aria-pressed={provider === p}
               className={`flex-1 py-1.5 text-xs font-medium rounded border transition-colors ${
                 provider === p
                   ? 'bg-gov-blue text-white border-gov-blue'
                   : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
               }`}
             >
-              {p === 'glean' ? '🔍 Glean' : '🤖 Claude'}
+              <span aria-hidden="true">{p === 'glean' ? '🔍 ' : '🤖 '}</span>
+              {p === 'glean' ? 'Glean' : 'Claude'}
             </button>
           ))}
         </div>
 
-        <textarea
-          value={scope}
-          onChange={(e) => setScope(e.target.value)}
-          placeholder="Optional: focus area (e.g., 'emphasis on accessibility compliance and DOGE initiatives')"
-          className="w-full border border-gray-300 rounded px-2.5 py-2 text-xs resize-none h-16 focus:outline-none focus:ring-1 focus:ring-gov-blue"
-        />
+        <div>
+          <label htmlFor="briefing-scope" className="sr-only">Optional focus area for the briefing</label>
+          <textarea
+            id="briefing-scope"
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+            placeholder="Optional: focus area (e.g., 'emphasis on accessibility compliance and DOGE initiatives')"
+            className="w-full border border-gray-300 rounded px-2.5 py-2 text-xs resize-none h-16 focus:outline-none focus:ring-1 focus:ring-gov-blue"
+          />
+        </div>
 
         <button
           onClick={() => mutation.mutate()}
           disabled={mutation.isPending}
           className="w-full btn-primary text-xs justify-center"
         >
-          {mutation.isPending ? '⟳ Researching… (this may take a minute)' : '🔬 Generate Briefing'}
+          <span aria-hidden="true">{mutation.isPending ? '⟳ ' : '🔬 '}</span>
+          {mutation.isPending ? 'Researching… (this may take a minute)' : 'Generate Briefing'}
         </button>
 
         {mutation.isError && (
-          <div className="text-xs text-red-600 bg-red-50 rounded p-2">
+          <div role="alert" className="text-xs text-red-600 bg-red-50 rounded p-2">
             {mutation.error?.message}
           </div>
         )}
