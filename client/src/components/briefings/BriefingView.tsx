@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { api } from '../../lib/api';
 
 interface BriefingViewProps {
@@ -14,7 +15,7 @@ export default function BriefingView({ briefing }: BriefingViewProps) {
     : [];
 
   const html = briefing.full_markdown
-    ? marked.parse(briefing.full_markdown, { async: false }) as string
+    ? DOMPurify.sanitize(marked.parse(briefing.full_markdown, { async: false }) as string)
     : '';
 
   const handleExport = () => {
