@@ -98,7 +98,11 @@ export default function SettingsView() {
     setGsaImportErrors([]);
     setGsaImportErrorCount(0);
     try {
-      const r = await api.importFromGSA(gsaAgency.trim() || undefined) as any;
+      const r = await api.importFromGSA(gsaAgency.trim() || undefined, (progress) => {
+        setGsaImportStatus(
+          `Fetching page ${progress.page} of ${progress.totalPages}… (${progress.inserted} new, ${progress.updated} updated)`
+        );
+      }) as any;
       const totalErrors: number = r.error_count ?? r.errors?.length ?? 0;
       setGsaImportStatus(
         `✓ Imported ${r.inserted} new, ${r.updated} updated of ${r.total_sites} total (${r.pages_fetched} pages)` +
@@ -203,7 +207,7 @@ export default function SettingsView() {
           </div>
           {gsaImportStatus && (
             <div className="mt-2">
-              <div className={`text-xs ${gsaImportStatus.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>
+              <div className={`text-xs ${gsaImportStatus.startsWith('✓') ? 'text-green-600' : gsaImporting ? 'text-gray-500' : 'text-red-600'}`}>
                 {gsaImportStatus}
               </div>
               {gsaImportErrors.length > 0 && (

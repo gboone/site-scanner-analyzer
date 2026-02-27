@@ -44,8 +44,41 @@ export const api = {
     const q = new URLSearchParams(params).toString();
     return request(`/gsa/fetch?${q}`);
   },
-  importFromGSA: (agency?: string) =>
-    request('/gsa/import', { method: 'POST', body: JSON.stringify({ agency: agency || undefined }) }),
+  importFromGSA: async (
+    agency?: string,
+    onProgress?: (data: { page: number; totalPages: number; inserted: number; updated: number }) => void
+  ) => {
+    const res = await fetch(`${BASE}/gsa/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agency: agency || undefined }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error((err as any).error || `HTTP ${res.status}`);
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: any = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const data = JSON.parse(line);
+          if (data.type === 'complete' || data.type === 'error') result = data;
+          else if (data.type === 'progress') onProgress?.(data);
+        } catch { /* ignore partial lines */ }
+      }
+    }
+    if (result?.type === 'error') throw new Error(result.error);
+    return result;
+  },
   summarizeDashboard: (provider: 'claude' | 'glean', filter?: { agency?: string; bureau?: string }) =>
     request('/stats/summarize', {
       method: 'POST',
