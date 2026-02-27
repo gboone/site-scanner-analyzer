@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { sqlite } from '../db';
+import { query, execute } from '../db';
 
 const router = Router();
 
 // GET /api/v1/sites - paginated list with filter/sort
-router.get('/', (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   const page = Math.max(1, parseInt(req.query.page as string || '1'));
   const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit as string || '25')));
   const offset = (page - 1) * limit;
@@ -26,7 +26,8 @@ router.get('/', (req: Request, res: Response) => {
   const params: Record<string, unknown> = {};
 
   if (search) {
-    conditions.push('(domain LIKE @search OR agency LIKE @search OR bureau LIKE @search OR title LIKE @search)');
+    // ILIKE for case-insensitive search in PostgreSQL
+    conditions.push('(domain ILIKE :search OR agency ILIKE :search OR bureau ILIKE :search OR title ILIKE :search)');
     params.search = `%${search}%`;
   }
 
@@ -39,22 +40,24 @@ router.get('/', (req: Request, res: Response) => {
   if (req.query.https_enforced === 'true') conditions.push('https_enforced = 1');
   if (req.query.has_login === 'true') conditions.push('login_provider IS NOT NULL');
   if (req.query.agency) {
-    conditions.push('agency = @agency');
+    conditions.push('agency = :agency');
     params.agency = req.query.agency;
   }
   if (req.query.bureau) {
-    conditions.push('bureau = @bureau');
+    conditions.push('bureau = :bureau');
     params.bureau = req.query.bureau;
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  const countRow = sqlite.prepare(`SELECT COUNT(*) as count FROM sites ${where}`).get(params) as { count: number };
-  const total = countRow.count;
+  // pg returns COUNT(*) as a string — cast to Number
+  const countRows = await query<{ count: string }>(`SELECT COUNT(*) as count FROM sites ${where}`, params);
+  const total = Number(countRows[0].count);
 
-  const rows = sqlite.prepare(
-    `SELECT * FROM sites ${where} ORDER BY ${safeSort} ${order} LIMIT @limit OFFSET @offset`
-  ).all({ ...params, limit, offset });
+  const rows = await query(
+    `SELECT * FROM sites ${where} ORDER BY ${safeSort} ${order} LIMIT :limit OFFSET :offset`,
+    { ...params, limit, offset }
+  );
 
   res.json({
     data: rows,
@@ -66,32 +69,34 @@ router.get('/', (req: Request, res: Response) => {
 });
 
 // GET /api/v1/sites/:domain - single site with scan history
-router.get('/:domain', (req: Request, res: Response) => {
+router.get('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
-  const site = sqlite.prepare('SELECT * FROM sites WHERE domain = ?').get(domain);
+  const site = (await query('SELECT * FROM sites WHERE domain = $1', [domain]))[0];
 
   if (!site) {
     res.status(404).json({ error: 'Site not found' });
     return;
   }
 
-  const scanHistory = sqlite.prepare(
-    'SELECT * FROM scan_history WHERE domain = ? ORDER BY scanned_at DESC LIMIT 20'
-  ).all(domain);
+  const scanHistory = await query(
+    'SELECT * FROM scan_history WHERE domain = $1 ORDER BY scanned_at DESC LIMIT 20',
+    [domain]
+  );
 
-  const briefings = sqlite.prepare(
-    'SELECT id, domain, created_at, provider, model, full_markdown FROM briefings WHERE domain = ? ORDER BY created_at DESC LIMIT 5'
-  ).all(domain);
+  const briefings = await query(
+    'SELECT id, domain, created_at, provider, model, full_markdown FROM briefings WHERE domain = $1 ORDER BY created_at DESC LIMIT 5',
+    [domain]
+  );
 
   res.json({ site, scan_history: scanHistory, briefings });
 });
 
 // PUT /api/v1/sites/:domain - update site record
-router.put('/:domain', (req: Request, res: Response) => {
+router.put('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
   const updates = req.body as Record<string, unknown>;
 
-  const existing = sqlite.prepare('SELECT domain FROM sites WHERE domain = ?').get(domain);
+  const existing = (await query('SELECT domain FROM sites WHERE domain = $1', [domain]))[0];
   if (!existing) {
     res.status(404).json({ error: 'Site not found' });
     return;
@@ -110,11 +115,11 @@ router.put('/:domain', (req: Request, res: Response) => {
   safeUpdates.domain = domain;
 
   const cols = Object.keys(safeUpdates).filter(k => k !== 'domain');
-  const setClause = cols.map(k => `${k} = @${k}`).join(', ');
+  const setClause = cols.map(k => `${k} = :${k}`).join(', ');
 
-  sqlite.prepare(`UPDATE sites SET ${setClause} WHERE domain = @domain`).run(safeUpdates);
+  await execute(`UPDATE sites SET ${setClause} WHERE domain = :domain`, safeUpdates);
 
-  const updated = sqlite.prepare('SELECT * FROM sites WHERE domain = ?').get(domain);
+  const updated = (await query('SELECT * FROM sites WHERE domain = $1', [domain]))[0];
   res.json(updated);
 });
 

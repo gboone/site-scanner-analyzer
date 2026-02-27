@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { sqlite } from '../db';
+import { query, transaction, toPositional } from '../db';
 import type { SiteRecord, ImportResult } from 'shared';
 
 const router = Router();
@@ -109,7 +109,7 @@ function toDbRow(site: SiteRecord): Record<string, unknown> {
 }
 
 const UPSERT_SQL = `
-  INSERT OR REPLACE INTO sites (
+  INSERT INTO sites (
     domain, name, url, base_domain, initial_url, initial_domain, initial_base_domain,
     initial_top_level_domain, top_level_domain, redirect, live, status_code, media_type,
     page_hash, scan_date, test_404, agency, bureau, branch,
@@ -136,35 +136,133 @@ const UPSERT_SQL = `
     www_url, www_status_code, www_title,
     imported_at, updated_at
   ) VALUES (
-    @domain, @name, @url, @base_domain, @initial_url, @initial_domain, @initial_base_domain,
-    @initial_top_level_domain, @top_level_domain, @redirect, @live, @status_code, @media_type,
-    @page_hash, @scan_date, @test_404, @agency, @bureau, @branch,
-    @primary_scan_status, @accessibility_scan_status, @dns_scan_status, @not_found_scan_status,
-    @performance_scan_status, @robots_txt_scan_status, @security_scan_status,
-    @sitemap_xml_scan_status, @www_scan_status,
-    @pageviews, @dap, @dap_parameters, @dap_version, @ga_tag_id, @search_dot_gov,
-    @ipv6, @hostname, @cms, @login_provider, @site_search, @viewport_meta_tag, @main_element_present,
-    @language, @language_link, @cumulative_layout_shift, @largest_contentful_paint,
-    @title, @description, @keywords, @og_title, @og_description, @og_image,
-    @og_article_published, @og_article_modified, @og_type, @og_url, @canonical_link,
-    @required_links_url, @required_links_text,
-    @third_party_service_count, @third_party_service_domains, @third_party_service_urls,
-    @cookie_domains, @source_list,
-    @robots_txt_detected, @robots_txt_url, @robots_txt_status_code, @robots_txt_media_type,
-    @robots_txt_filesize, @robots_txt_crawl_delay, @robots_txt_sitemap_locations,
-    @sitemap_xml_detected, @sitemap_xml_url, @sitemap_xml_status_code, @sitemap_xml_media_type,
-    @sitemap_xml_filesize, @sitemap_xml_count, @sitemap_xml_lastmod, @sitemap_xml_pdf_count,
-    @sitemap_xml_page_hash,
-    @uswds_favicon, @uswds_favicon_in_css, @uswds_publicsans_font, @uswds_inpage_css,
-    @uswds_string, @uswds_string_in_css, @uswds_version, @uswds_count, @uswds_usa_classes,
-    @uswds_usa_class_list, @uswds_banner_heres_how, @uswds_semantic_version,
-    @https_enforced, @hsts,
-    @www_url, @www_status_code, @www_title,
-    @imported_at, @updated_at
+    :domain, :name, :url, :base_domain, :initial_url, :initial_domain, :initial_base_domain,
+    :initial_top_level_domain, :top_level_domain, :redirect, :live, :status_code, :media_type,
+    :page_hash, :scan_date, :test_404, :agency, :bureau, :branch,
+    :primary_scan_status, :accessibility_scan_status, :dns_scan_status, :not_found_scan_status,
+    :performance_scan_status, :robots_txt_scan_status, :security_scan_status,
+    :sitemap_xml_scan_status, :www_scan_status,
+    :pageviews, :dap, :dap_parameters, :dap_version, :ga_tag_id, :search_dot_gov,
+    :ipv6, :hostname, :cms, :login_provider, :site_search, :viewport_meta_tag, :main_element_present,
+    :language, :language_link, :cumulative_layout_shift, :largest_contentful_paint,
+    :title, :description, :keywords, :og_title, :og_description, :og_image,
+    :og_article_published, :og_article_modified, :og_type, :og_url, :canonical_link,
+    :required_links_url, :required_links_text,
+    :third_party_service_count, :third_party_service_domains, :third_party_service_urls,
+    :cookie_domains, :source_list,
+    :robots_txt_detected, :robots_txt_url, :robots_txt_status_code, :robots_txt_media_type,
+    :robots_txt_filesize, :robots_txt_crawl_delay, :robots_txt_sitemap_locations,
+    :sitemap_xml_detected, :sitemap_xml_url, :sitemap_xml_status_code, :sitemap_xml_media_type,
+    :sitemap_xml_filesize, :sitemap_xml_count, :sitemap_xml_lastmod, :sitemap_xml_pdf_count,
+    :sitemap_xml_page_hash,
+    :uswds_favicon, :uswds_favicon_in_css, :uswds_publicsans_font, :uswds_inpage_css,
+    :uswds_string, :uswds_string_in_css, :uswds_version, :uswds_count, :uswds_usa_classes,
+    :uswds_usa_class_list, :uswds_banner_heres_how, :uswds_semantic_version,
+    :https_enforced, :hsts,
+    :www_url, :www_status_code, :www_title,
+    :imported_at, :updated_at
   )
+  ON CONFLICT (domain) DO UPDATE SET
+    name                       = EXCLUDED.name,
+    url                        = EXCLUDED.url,
+    base_domain                = EXCLUDED.base_domain,
+    initial_url                = EXCLUDED.initial_url,
+    initial_domain             = EXCLUDED.initial_domain,
+    initial_base_domain        = EXCLUDED.initial_base_domain,
+    initial_top_level_domain   = EXCLUDED.initial_top_level_domain,
+    top_level_domain           = EXCLUDED.top_level_domain,
+    redirect                   = EXCLUDED.redirect,
+    live                       = EXCLUDED.live,
+    status_code                = EXCLUDED.status_code,
+    media_type                 = EXCLUDED.media_type,
+    page_hash                  = EXCLUDED.page_hash,
+    scan_date                  = EXCLUDED.scan_date,
+    test_404                   = EXCLUDED.test_404,
+    agency                     = EXCLUDED.agency,
+    bureau                     = EXCLUDED.bureau,
+    branch                     = EXCLUDED.branch,
+    primary_scan_status        = EXCLUDED.primary_scan_status,
+    accessibility_scan_status  = EXCLUDED.accessibility_scan_status,
+    dns_scan_status            = EXCLUDED.dns_scan_status,
+    not_found_scan_status      = EXCLUDED.not_found_scan_status,
+    performance_scan_status    = EXCLUDED.performance_scan_status,
+    robots_txt_scan_status     = EXCLUDED.robots_txt_scan_status,
+    security_scan_status       = EXCLUDED.security_scan_status,
+    sitemap_xml_scan_status    = EXCLUDED.sitemap_xml_scan_status,
+    www_scan_status            = EXCLUDED.www_scan_status,
+    pageviews                  = EXCLUDED.pageviews,
+    dap                        = EXCLUDED.dap,
+    dap_parameters             = EXCLUDED.dap_parameters,
+    dap_version                = EXCLUDED.dap_version,
+    ga_tag_id                  = EXCLUDED.ga_tag_id,
+    search_dot_gov             = EXCLUDED.search_dot_gov,
+    ipv6                       = EXCLUDED.ipv6,
+    hostname                   = EXCLUDED.hostname,
+    cms                        = EXCLUDED.cms,
+    login_provider             = EXCLUDED.login_provider,
+    site_search                = EXCLUDED.site_search,
+    viewport_meta_tag          = EXCLUDED.viewport_meta_tag,
+    main_element_present       = EXCLUDED.main_element_present,
+    language                   = EXCLUDED.language,
+    language_link              = EXCLUDED.language_link,
+    cumulative_layout_shift    = EXCLUDED.cumulative_layout_shift,
+    largest_contentful_paint   = EXCLUDED.largest_contentful_paint,
+    title                      = EXCLUDED.title,
+    description                = EXCLUDED.description,
+    keywords                   = EXCLUDED.keywords,
+    og_title                   = EXCLUDED.og_title,
+    og_description             = EXCLUDED.og_description,
+    og_image                   = EXCLUDED.og_image,
+    og_article_published       = EXCLUDED.og_article_published,
+    og_article_modified        = EXCLUDED.og_article_modified,
+    og_type                    = EXCLUDED.og_type,
+    og_url                     = EXCLUDED.og_url,
+    canonical_link             = EXCLUDED.canonical_link,
+    required_links_url         = EXCLUDED.required_links_url,
+    required_links_text        = EXCLUDED.required_links_text,
+    third_party_service_count  = EXCLUDED.third_party_service_count,
+    third_party_service_domains = EXCLUDED.third_party_service_domains,
+    third_party_service_urls   = EXCLUDED.third_party_service_urls,
+    cookie_domains             = EXCLUDED.cookie_domains,
+    source_list                = EXCLUDED.source_list,
+    robots_txt_detected        = EXCLUDED.robots_txt_detected,
+    robots_txt_url             = EXCLUDED.robots_txt_url,
+    robots_txt_status_code     = EXCLUDED.robots_txt_status_code,
+    robots_txt_media_type      = EXCLUDED.robots_txt_media_type,
+    robots_txt_filesize        = EXCLUDED.robots_txt_filesize,
+    robots_txt_crawl_delay     = EXCLUDED.robots_txt_crawl_delay,
+    robots_txt_sitemap_locations = EXCLUDED.robots_txt_sitemap_locations,
+    sitemap_xml_detected       = EXCLUDED.sitemap_xml_detected,
+    sitemap_xml_url            = EXCLUDED.sitemap_xml_url,
+    sitemap_xml_status_code    = EXCLUDED.sitemap_xml_status_code,
+    sitemap_xml_media_type     = EXCLUDED.sitemap_xml_media_type,
+    sitemap_xml_filesize       = EXCLUDED.sitemap_xml_filesize,
+    sitemap_xml_count          = EXCLUDED.sitemap_xml_count,
+    sitemap_xml_lastmod        = EXCLUDED.sitemap_xml_lastmod,
+    sitemap_xml_pdf_count      = EXCLUDED.sitemap_xml_pdf_count,
+    sitemap_xml_page_hash      = EXCLUDED.sitemap_xml_page_hash,
+    uswds_favicon              = EXCLUDED.uswds_favicon,
+    uswds_favicon_in_css       = EXCLUDED.uswds_favicon_in_css,
+    uswds_publicsans_font      = EXCLUDED.uswds_publicsans_font,
+    uswds_inpage_css           = EXCLUDED.uswds_inpage_css,
+    uswds_string               = EXCLUDED.uswds_string,
+    uswds_string_in_css        = EXCLUDED.uswds_string_in_css,
+    uswds_version              = EXCLUDED.uswds_version,
+    uswds_count                = EXCLUDED.uswds_count,
+    uswds_usa_classes          = EXCLUDED.uswds_usa_classes,
+    uswds_usa_class_list       = EXCLUDED.uswds_usa_class_list,
+    uswds_banner_heres_how     = EXCLUDED.uswds_banner_heres_how,
+    uswds_semantic_version     = EXCLUDED.uswds_semantic_version,
+    https_enforced             = EXCLUDED.https_enforced,
+    hsts                       = EXCLUDED.hsts,
+    www_url                    = EXCLUDED.www_url,
+    www_status_code            = EXCLUDED.www_status_code,
+    www_title                  = EXCLUDED.www_title,
+    imported_at                = EXCLUDED.imported_at,
+    updated_at                 = EXCLUDED.updated_at
 `;
 
-router.post('/', (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   const sites: SiteRecord[] = req.body;
 
   if (!Array.isArray(sites)) {
@@ -173,37 +271,42 @@ router.post('/', (req: Request, res: Response) => {
   }
 
   const result: ImportResult = { inserted: 0, updated: 0, errors: [] };
-  const stmt = sqlite.prepare(UPSERT_SQL);
 
-  const existingDomains = new Set(
-    sqlite.prepare('SELECT domain FROM sites').all().map((r: any) => r.domain)
-  );
+  // Fetch existing domains once so we can report inserted vs updated counts
+  const existingRows = await query<{ domain: string }>('SELECT domain FROM sites');
+  const existingDomains = new Set(existingRows.map(r => r.domain));
 
-  const insertMany = sqlite.transaction((batch: SiteRecord[]) => {
-    for (const site of batch) {
-      try {
-        if (!site.domain) {
-          result.errors.push(`Skipping record with no domain: ${JSON.stringify(site).slice(0, 100)}`);
-          continue;
-        }
-        const row = toDbRow(site);
-        stmt.run(row);
-        if (existingDomains.has(site.domain)) {
-          result.updated++;
-        } else {
-          result.inserted++;
-          existingDomains.add(site.domain);
-        }
-      } catch (err: any) {
-        result.errors.push(`Error importing ${site.domain}: ${err.message}`);
-      }
+  // Validate and pre-process all rows before entering any transactions.
+  // PostgreSQL aborts the entire transaction on error, so we filter invalid
+  // rows out here rather than catching inside the transaction callback.
+  const validSites: { row: Record<string, unknown>; isNew: boolean }[] = [];
+  for (const site of sites) {
+    if (!site.domain) {
+      result.errors.push(`Skipping record with no domain: ${JSON.stringify(site).slice(0, 100)}`);
+      continue;
     }
-  });
+    validSites.push({ row: toDbRow(site), isNew: !existingDomains.has(site.domain) });
+    existingDomains.add(site.domain); // track dupes within the same payload
+  }
 
-  // Process in batches of 100
+  // Process in batches of 100 — each batch is one atomic transaction
   const BATCH_SIZE = 100;
-  for (let i = 0; i < sites.length; i += BATCH_SIZE) {
-    insertMany(sites.slice(i, i + BATCH_SIZE));
+  for (let i = 0; i < validSites.length; i += BATCH_SIZE) {
+    const batch = validSites.slice(i, i + BATCH_SIZE);
+    try {
+      await transaction(async (client) => {
+        for (const { row } of batch) {
+          const [s, a] = toPositional(UPSERT_SQL, row);
+          await client.query(s, a);
+        }
+      });
+      for (const { isNew } of batch) {
+        if (isNew) result.inserted++;
+        else result.updated++;
+      }
+    } catch (err: any) {
+      result.errors.push(`Batch error (rows ${i}–${i + batch.length - 1}): ${err.message}`);
+    }
   }
 
   res.json(result);

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { sqlite } from '../db';
+import { query } from '../db';
 
 export const agenciesRouter = Router();
 export const bureausRouter = Router();
@@ -9,22 +9,22 @@ export const bureausRouter = Router();
  * Returns up to 20 distinct agency names matching the query string (case-insensitive LIKE).
  * Returns the top agencies by site count when q is omitted or empty.
  */
-agenciesRouter.get('/', (req: Request, res: Response) => {
+agenciesRouter.get('/', async (req: Request, res: Response) => {
   const q = ((req.query.q as string) || '').trim();
 
   const rows = q
-    ? (sqlite.prepare(`
+    ? await query(`
         SELECT agency, COUNT(*) as count FROM sites
-        WHERE agency IS NOT NULL AND agency LIKE @q
+        WHERE agency IS NOT NULL AND agency ILIKE :q
         GROUP BY agency ORDER BY count DESC LIMIT 20
-      `).all({ q: `%${q}%` }) as any[])
-    : (sqlite.prepare(`
+      `, { q: `%${q}%` })
+    : await query(`
         SELECT agency, COUNT(*) as count FROM sites
         WHERE agency IS NOT NULL
         GROUP BY agency ORDER BY count DESC LIMIT 20
-      `).all() as any[]);
+      `);
 
-  res.json(rows.map((r) => ({ value: r.agency, count: r.count })));
+  res.json(rows.map((r: any) => ({ value: r.agency, count: r.count })));
 });
 
 /**
@@ -32,7 +32,7 @@ agenciesRouter.get('/', (req: Request, res: Response) => {
  * Returns up to 20 distinct bureau/office names matching the query string.
  * When agency is provided the results are scoped to that agency only.
  */
-bureausRouter.get('/', (req: Request, res: Response) => {
+bureausRouter.get('/', async (req: Request, res: Response) => {
   const q = ((req.query.q as string) || '').trim();
   const agency = ((req.query.agency as string) || '').trim() || null;
 
@@ -40,29 +40,29 @@ bureausRouter.get('/', (req: Request, res: Response) => {
 
   if (agency) {
     rows = q
-      ? (sqlite.prepare(`
+      ? await query(`
           SELECT bureau, COUNT(*) as count FROM sites
-          WHERE bureau IS NOT NULL AND agency = @agency AND bureau LIKE @q
+          WHERE bureau IS NOT NULL AND agency = :agency AND bureau ILIKE :q
           GROUP BY bureau ORDER BY count DESC LIMIT 20
-        `).all({ agency, q: `%${q}%` }) as any[])
-      : (sqlite.prepare(`
+        `, { agency, q: `%${q}%` })
+      : await query(`
           SELECT bureau, COUNT(*) as count FROM sites
-          WHERE bureau IS NOT NULL AND agency = @agency
+          WHERE bureau IS NOT NULL AND agency = :agency
           GROUP BY bureau ORDER BY count DESC LIMIT 20
-        `).all({ agency }) as any[]);
+        `, { agency });
   } else {
     rows = q
-      ? (sqlite.prepare(`
+      ? await query(`
           SELECT bureau, COUNT(*) as count FROM sites
-          WHERE bureau IS NOT NULL AND bureau LIKE @q
+          WHERE bureau IS NOT NULL AND bureau ILIKE :q
           GROUP BY bureau ORDER BY count DESC LIMIT 20
-        `).all({ q: `%${q}%` }) as any[])
-      : (sqlite.prepare(`
+        `, { q: `%${q}%` })
+      : await query(`
           SELECT bureau, COUNT(*) as count FROM sites
           WHERE bureau IS NOT NULL
           GROUP BY bureau ORDER BY count DESC LIMIT 20
-        `).all() as any[]);
+        `);
   }
 
-  res.json(rows.map((r) => ({ value: r.bureau, count: r.count })));
+  res.json(rows.map((r: any) => ({ value: r.bureau, count: r.count })));
 });

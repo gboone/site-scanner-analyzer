@@ -1,27 +1,103 @@
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import * as schema from './schema';
-import * as fs from 'fs';
-import * as path from 'path';
-import { config } from '../config';
+import pg from 'pg';
+import type { PoolClient } from 'pg';
 
-const dbDir = path.dirname(path.resolve(config.dbPath));
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+// Return timestamps as ISO strings rather than JS Date objects so the rest of
+// the app (which expects string values from SQLite) works without changes.
+pg.types.setTypeParser(pg.types.builtins.TIMESTAMPTZ, (val: string | null) =>
+  val ? new Date(val).toISOString() : null
+);
+pg.types.setTypeParser(pg.types.builtins.TIMESTAMP, (val: string | null) =>
+  val ? new Date(val).toISOString() : null
+);
+
+export const pool = new pg.Pool({
+  host:     process.env.DB_HOST     ?? 'localhost',
+  port:     parseInt(process.env.DB_PORT ?? '5432'),
+  user:     process.env.DB_USER     ?? 'postgres',
+  password: process.env.DB_PASSWORD ?? '',
+  database: process.env.DB_NAME     ?? 'scanner',
+  max: 10,
+  ssl: process.env.DB_SSL === 'false' ? false : process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
+
+// ---------------------------------------------------------------------------
+// Convert :name → $1, $2, ... positional params (pg uses positional params)
+// ---------------------------------------------------------------------------
+export function toPositional(
+  sql: string,
+  params: Record<string, unknown>
+): [string, unknown[]] {
+  const args: unknown[] = [];
+  const converted = sql.replace(/:(\w+)/g, (_, key) => {
+    args.push(params[key]);
+    return `$${args.length}`;
+  });
+  return [converted, args];
 }
 
-const sqlite = new Database(path.resolve(config.dbPath));
+// ---------------------------------------------------------------------------
+// SELECT helper → T[]
+// ---------------------------------------------------------------------------
+export async function query<T = Record<string, unknown>>(
+  sql: string,
+  args?: Record<string, unknown> | unknown[]
+): Promise<T[]> {
+  if (args && !Array.isArray(args)) {
+    const [s, a] = toPositional(sql, args);
+    return (await pool.query(s, a)).rows as T[];
+  }
+  return (await pool.query(sql, (args as unknown[]) ?? [])).rows as T[];
+}
 
-// Enable WAL mode for better concurrency
-sqlite.pragma('journal_mode = WAL');
-sqlite.pragma('foreign_keys = ON');
+// ---------------------------------------------------------------------------
+// INSERT / UPDATE / DELETE helper — use RETURNING for auto-increment IDs
+// ---------------------------------------------------------------------------
+export async function execute(
+  sql: string,
+  args?: Record<string, unknown> | unknown[]
+): Promise<{ rows: Record<string, unknown>[]; rowCount: number }> {
+  if (args && !Array.isArray(args)) {
+    const [s, a] = toPositional(sql, args);
+    const r = await pool.query(s, a);
+    return { rows: r.rows, rowCount: r.rowCount ?? 0 };
+  }
+  const r = await pool.query(sql, (args as unknown[]) ?? []);
+  return { rows: r.rows, rowCount: r.rowCount ?? 0 };
+}
 
-export const db = drizzle(sqlite, { schema });
-export { sqlite };
+// ---------------------------------------------------------------------------
+// Transaction helper
+// ---------------------------------------------------------------------------
+export async function transaction<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
 
-// Bootstrap tables if they don't exist (simple approach without drizzle-kit in dev)
-export function initDb() {
-  sqlite.exec(`
+// ---------------------------------------------------------------------------
+// Schema bootstrap — idempotent, runs at startup
+// ---------------------------------------------------------------------------
+export async function initDb(): Promise<void> {
+  // Use ADD COLUMN IF NOT EXISTS — clean, no try/catch needed in PostgreSQL
+  const addCol = async (col: string, type = 'TEXT') => {
+    await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS "${col}" ${type}`);
+  };
+
+  // ISO-format timestamp default for TEXT date columns
+  const TS_DEFAULT = `to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sites (
       domain TEXT PRIMARY KEY,
       name TEXT,
@@ -91,7 +167,7 @@ export function initDb() {
       robots_txt_status_code INTEGER,
       robots_txt_media_type TEXT,
       robots_txt_filesize INTEGER,
-      robots_txt_crawl_delay REAL,
+      robots_txt_crawl_delay DOUBLE PRECISION,
       robots_txt_sitemap_locations TEXT,
       sitemap_xml_detected INTEGER,
       sitemap_xml_url TEXT,
@@ -119,19 +195,21 @@ export function initDb() {
       www_url TEXT,
       www_status_code INTEGER,
       www_title TEXT,
-      imported_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
+      imported_at TEXT NOT NULL DEFAULT (${TS_DEFAULT}),
+      updated_at TEXT NOT NULL DEFAULT (${TS_DEFAULT})
+    )
+  `);
 
-    CREATE INDEX IF NOT EXISTS idx_sites_agency ON sites(agency);
-    CREATE INDEX IF NOT EXISTS idx_sites_bureau ON sites(bureau);
-    CREATE INDEX IF NOT EXISTS idx_sites_live ON sites(live);
-    CREATE INDEX IF NOT EXISTS idx_sites_uswds ON sites(uswds_count);
-    CREATE INDEX IF NOT EXISTS idx_sites_dap ON sites(dap);
-    CREATE INDEX IF NOT EXISTS idx_sites_sitemap ON sites(sitemap_xml_detected);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_agency  ON sites(agency)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_bureau  ON sites(bureau)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_live    ON sites(live)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_uswds   ON sites(uswds_count)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_dap     ON sites(dap)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_sitemap ON sites(sitemap_xml_detected)`);
 
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS scan_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       domain TEXT NOT NULL REFERENCES sites(domain) ON DELETE CASCADE,
       scanned_at TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -143,13 +221,14 @@ export function initDb() {
       diff_summary TEXT,
       error_log TEXT,
       duration_ms INTEGER
-    );
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_scan_history_domain     ON scan_history(domain)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_scan_history_scanned_at ON scan_history(scanned_at)`);
 
-    CREATE INDEX IF NOT EXISTS idx_scan_history_domain ON scan_history(domain);
-    CREATE INDEX IF NOT EXISTS idx_scan_history_scanned_at ON scan_history(scanned_at);
-
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS briefings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       domain TEXT NOT NULL REFERENCES sites(domain) ON DELETE CASCADE,
       created_at TEXT NOT NULL,
       provider TEXT NOT NULL,
@@ -164,101 +243,82 @@ export function initDb() {
       prompt_tokens INTEGER,
       completion_tokens INTEGER,
       duration_ms INTEGER
-    );
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_briefings_domain ON briefings(domain)`);
 
-    CREATE INDEX IF NOT EXISTS idx_briefings_domain ON briefings(domain);
-
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
+      updated_at TEXT NOT NULL DEFAULT (${TS_DEFAULT})
+    )
   `);
-  // Add columns introduced by the GSA API importer that weren't in the original schema.
-  // ALTER TABLE IF NOT EXISTS ... ADD COLUMN is safe to run on every startup.
-  const addCol = (col: string, type = 'TEXT') => {
-    try {
-      sqlite.exec(`ALTER TABLE sites ADD COLUMN ${col} ${type}`);
-    } catch {
-      // Column already exists — ignore
-    }
-  };
 
-  addCol('https', 'INTEGER');
-  addCol('http_status_code', 'INTEGER');
-  addCol('final_url');
-  addCol('redirect_to');
-  addCol('content_type');
-  addCol('hsts_preloaded', 'INTEGER');
-  addCol('dnssec', 'INTEGER');
-  addCol('has_login', 'INTEGER');
-  addCol('ga', 'INTEGER');
-  addCol('script_tags');
-  addCol('analytics_detected', 'INTEGER');
-  addCol('analytics_platforms');
-  addCol('source_code_url');
-  addCol('site_search_detected', 'INTEGER');
-  addCol('contact_email_address');
-  addCol('contact_form_detected', 'INTEGER');
-  addCol('accessibility_statement_detected', 'INTEGER');
-  addCol('doge_url');
-  addCol('uswds_merriweather_font', 'INTEGER');
-  addCol('uswds_public_sans_font', 'INTEGER');
-  addCol('uswds_source_sans_font', 'INTEGER');
-  addCol('sitemap_xml_detected_by_robotstxt', 'INTEGER');
+  // ADD COLUMN IF NOT EXISTS — columns introduced by GSA importer or client-side scanner
+  await addCol('https', 'INTEGER');
+  await addCol('http_status_code', 'INTEGER');
+  await addCol('final_url');
+  await addCol('redirect_to');
+  await addCol('content_type');
+  await addCol('hsts_preloaded', 'INTEGER');
+  await addCol('dnssec', 'INTEGER');
+  await addCol('has_login', 'INTEGER');
+  await addCol('ga', 'INTEGER');
+  await addCol('script_tags');
+  await addCol('analytics_detected', 'INTEGER');
+  await addCol('analytics_platforms');
+  await addCol('source_code_url');
+  await addCol('site_search_detected', 'INTEGER');
+  await addCol('contact_email_address');
+  await addCol('contact_form_detected', 'INTEGER');
+  await addCol('accessibility_statement_detected', 'INTEGER');
+  await addCol('doge_url');
+  await addCol('uswds_merriweather_font', 'INTEGER');
+  await addCol('uswds_public_sans_font', 'INTEGER');
+  await addCol('uswds_source_sans_font', 'INTEGER');
+  await addCol('sitemap_xml_detected_by_robotstxt', 'INTEGER');
+  await addCol('hosting_provider');
+  await addCol('web_server');
+  await addCol('cdn_provider');
+  await addCol('dns_a_records');
+  await addCol('dns_aaaa_records');
+  await addCol('dns_mx_records');
+  await addCol('dns_ns_records');
+  await addCol('wp_version');
+  await addCol('wp_theme');
+  await addCol('wp_theme_version');
+  await addCol('wp_plugins');
+  await addCol('last_scan_id', 'INTEGER');
+  await addCol('sitemap_sitemaps_found', 'INTEGER');
+  await addCol('sitemap_content_types');
+  await addCol('sitemap_url_patterns');
+  await addCol('sitemap_publishing_by_year');
+  await addCol('sitemap_publishing_by_month');
+  await addCol('sitemap_latest_update');
+  await addCol('sitemap_has_clean_urls', 'INTEGER');
+  await addCol('sitemap_path_depth_avg', 'DOUBLE PRECISION');
+  await addCol('wp_json_api_active', 'INTEGER');
+  await addCol('wp_api_endpoints');
+  await addCol('wp_post_count', 'INTEGER');
+  await addCol('wp_page_count', 'INTEGER');
+  await addCol('wp_author_count', 'INTEGER');
+  await addCol('wp_category_count', 'INTEGER');
+  await addCol('wp_tag_count', 'INTEGER');
+  await addCol('wp_media_total', 'INTEGER');
+  await addCol('wp_media_size_bytes', 'INTEGER');
+  await addCol('wp_media_size_formatted');
+  await addCol('wp_plugins_detailed');
+  await addCol('wp_feeds');
+  await addCol('wp_custom_post_types');
+  await addCol('detected_technologies');
+  await addCol('security_header_csp');
+  await addCol('security_header_xss');
 
-  // Columns populated by the client-side rescan / wp-analyze scanner
-  addCol('hosting_provider');          // e.g. "Amazon Web Services (Route 53)"
-  addCol('web_server');                // e.g. "Nginx", "Apache"
-  addCol('cdn_provider');              // e.g. "Cloudflare", "Fastly"
-  addCol('analytics_platforms');       // JSON array of detected analytics tools
-  addCol('dns_a_records');             // JSON array of IPv4 addresses
-  addCol('dns_aaaa_records');          // JSON array of IPv6 addresses
-  addCol('dns_mx_records');            // JSON array of MX records
-  addCol('dns_ns_records');            // JSON array of NS records
-  addCol('wp_version');                // WordPress version string
-  addCol('wp_theme');                  // Active theme slug
-  addCol('wp_theme_version');          // Active theme version
-  addCol('wp_plugins');                // JSON array of detectable plugin slugs
-  addCol('last_scan_id', 'INTEGER');   // FK to scan_history.id of most recent scan
-
-  // ── wp-analyze enrichment columns ──────────────────────────────────────────
-
-  // Enriched sitemap content analysis
-  addCol('sitemap_sitemaps_found', 'INTEGER');
-  addCol('sitemap_content_types');         // JSON: Record<string, {count, percentage}>
-  addCol('sitemap_url_patterns');          // JSON: [{segment, count, percentage}]
-  addCol('sitemap_publishing_by_year');    // JSON: Record<string, number>
-  addCol('sitemap_publishing_by_month');   // JSON: Record<string, number>
-  addCol('sitemap_latest_update');         // ISO date string
-  addCol('sitemap_has_clean_urls', 'INTEGER');
-  addCol('sitemap_path_depth_avg', 'REAL');
-
-  // WordPress REST API content data
-  addCol('wp_json_api_active', 'INTEGER');
-  addCol('wp_api_endpoints');              // JSON: string[] of namespace slugs
-  addCol('wp_post_count', 'INTEGER');
-  addCol('wp_page_count', 'INTEGER');
-  addCol('wp_author_count', 'INTEGER');
-  addCol('wp_category_count', 'INTEGER');
-  addCol('wp_tag_count', 'INTEGER');
-  addCol('wp_media_total', 'INTEGER');
-  addCol('wp_media_size_bytes', 'INTEGER');
-  addCol('wp_media_size_formatted');
-  addCol('wp_plugins_detailed');           // JSON: WpPluginDetected[] (richer than wp_plugins)
-  addCol('wp_feeds');                      // JSON: string[] of feed URLs
-  addCol('wp_custom_post_types');          // JSON: string[] of non-standard CPT slugs
-
-  // Generic technology detection & security headers
-  addCol('detected_technologies');         // JSON: DetectedTechnology[]
-  addCol('security_header_csp');           // Content-Security-Policy value
-  addCol('security_header_xss');           // X-XSS-Protection value
-
-  // Clean up any null-domain rows inserted by the old broken GSA importer
-  // (safe no-op if there are no such rows)
-  const deleted = sqlite.prepare('DELETE FROM sites WHERE domain IS NULL').run();
-  if (deleted.changes > 0) {
-    console.log(`  cleaned up ${deleted.changes} null-domain row(s) from previous import`);
+  // Clean up any null-domain rows from old broken imports
+  const deleted = await pool.query('DELETE FROM sites WHERE domain IS NULL');
+  if ((deleted.rowCount ?? 0) > 0) {
+    console.log(`  cleaned up ${deleted.rowCount} null-domain row(s) from previous import`);
   }
 
   console.log('✓ Database initialized');

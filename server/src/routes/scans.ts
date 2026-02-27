@@ -1,19 +1,20 @@
 import { Router, Request, Response } from 'express';
-import { sqlite } from '../db';
+import { query, execute } from '../db';
 
 const router = Router();
 
 // GET /api/v1/scans/:domain - get scan history
-router.get('/:domain', (req: Request, res: Response) => {
+router.get('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
-  const history = sqlite.prepare(
-    'SELECT * FROM scan_history WHERE domain = ? ORDER BY scanned_at DESC LIMIT 50'
-  ).all(domain);
+  const history = await query(
+    'SELECT * FROM scan_history WHERE domain = $1 ORDER BY scanned_at DESC LIMIT 50',
+    [domain]
+  );
   res.json(history);
 });
 
 // POST /api/v1/scans - store scan result and auto-apply to sites table
-router.post('/', (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   const { domain, scan_result, diff_summary } = req.body as {
     domain: string;
     scan_result: Record<string, unknown>;
@@ -25,36 +26,37 @@ router.post('/', (req: Request, res: Response) => {
     return;
   }
 
-  const existing = sqlite.prepare('SELECT domain FROM sites WHERE domain = ?').get(domain);
+  const existing = (await query('SELECT domain FROM sites WHERE domain = $1', [domain]))[0];
   if (!existing) {
     // Auto-create a minimal stub so newly-added domains can be scanned in
     // without requiring a prior GSA import. The scan result will fill the rest.
-    sqlite.prepare(
-      `INSERT OR IGNORE INTO sites (domain) VALUES (?)`
-    ).run(domain);
+    await execute(
+      'INSERT INTO sites (domain) VALUES ($1) ON CONFLICT (domain) DO NOTHING',
+      [domain]
+    );
   }
 
   const now = new Date().toISOString();
 
-  // Store scan history
-  const insertScan = sqlite.prepare(`
+  // Store scan history, get back the new row's id
+  const scanInsert = await execute(`
     INSERT INTO scan_history (domain, scanned_at, status, redirect_chain, sitemap_result, robots_result, tech_stack, dns_records, diff_summary, error_log, duration_ms)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const scanId = insertScan.run(
+    VALUES (:domain, :scanned_at, :status, :redirect_chain, :sitemap_result, :robots_result, :tech_stack, :dns_records, :diff_summary, :error_log, :duration_ms)
+    RETURNING id
+  `, {
     domain,
-    now,
-    (scan_result.status as string) || 'completed',
-    scan_result.redirect_chain ? JSON.stringify(scan_result.redirect_chain) : null,
-    scan_result.sitemap ? JSON.stringify(scan_result.sitemap) : null,
-    scan_result.robots ? JSON.stringify(scan_result.robots) : null,
-    scan_result.tech_stack ? JSON.stringify(scan_result.tech_stack) : null,
-    scan_result.dns ? JSON.stringify(scan_result.dns) : null,
-    diff_summary ? JSON.stringify(diff_summary) : null,
-    scan_result.errors ? JSON.stringify(scan_result.errors) : null,
-    scan_result.duration_ms ?? null,
-  ).lastInsertRowid;
+    scanned_at: now,
+    status: (scan_result.status as string) || 'completed',
+    redirect_chain:  scan_result.redirect_chain ? JSON.stringify(scan_result.redirect_chain) : null,
+    sitemap_result:  scan_result.sitemap        ? JSON.stringify(scan_result.sitemap)         : null,
+    robots_result:   scan_result.robots         ? JSON.stringify(scan_result.robots)          : null,
+    tech_stack:      scan_result.tech_stack     ? JSON.stringify(scan_result.tech_stack)      : null,
+    dns_records:     scan_result.dns            ? JSON.stringify(scan_result.dns)             : null,
+    diff_summary:    diff_summary               ? JSON.stringify(diff_summary)                 : null,
+    error_log:       scan_result.errors         ? JSON.stringify(scan_result.errors)          : null,
+    duration_ms:     scan_result.duration_ms    ?? null,
+  });
+  const scanId = Number(scanInsert.rows[0].id);
 
   // Auto-apply tech data to sites table
   const updates: Record<string, unknown> = { updated_at: now };
@@ -183,9 +185,9 @@ router.post('/', (req: Request, res: Response) => {
   updates.last_scan_id = scanId;
 
   const cols = Object.keys(updates).filter(k => k !== 'domain');
-  const setClause = cols.map(k => `${k} = @${k}`).join(', ');
+  const setClause = cols.map(k => `${k} = :${k}`).join(', ');
   updates.domain = domain;
-  sqlite.prepare(`UPDATE sites SET ${setClause} WHERE domain = @domain`).run(updates);
+  await execute(`UPDATE sites SET ${setClause} WHERE domain = :domain`, updates);
 
   res.json({ scan_id: scanId, applied: true });
 });

@@ -1,13 +1,13 @@
 import { Router, Request, Response } from 'express';
-import { sqlite } from '../db';
+import { query, execute } from '../db';
 import { config } from '../config';
 
 const router = Router();
 
 // GET /api/v1/briefings/export/:id — registered BEFORE /:domain to prevent "export" matching as a domain name
-router.get('/export/:id', (req: Request, res: Response) => {
+router.get('/export/:id', async (req: Request, res: Response) => {
   const id = parseInt(String(req.params.id));
-  const briefing = sqlite.prepare('SELECT * FROM briefings WHERE id = ?').get(id) as any;
+  const briefing = (await query<any>('SELECT * FROM briefings WHERE id = $1', [id]))[0];
   if (!briefing) {
     res.status(404).json({ error: 'Briefing not found' });
     return;
@@ -18,11 +18,12 @@ router.get('/export/:id', (req: Request, res: Response) => {
 });
 
 // GET /api/v1/briefings/:domain
-router.get('/:domain', (req: Request, res: Response) => {
+router.get('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
-  const briefings = sqlite.prepare(
-    'SELECT * FROM briefings WHERE domain = ? ORDER BY created_at DESC'
-  ).all(domain);
+  const briefings = await query(
+    'SELECT * FROM briefings WHERE domain = $1 ORDER BY created_at DESC',
+    [domain]
+  );
   res.json(briefings);
 });
 
@@ -39,7 +40,7 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  const site = sqlite.prepare('SELECT * FROM sites WHERE domain = ?').get(domain) as any;
+  const site = (await query<any>('SELECT * FROM sites WHERE domain = $1', [domain]))[0];
   if (!site) {
     res.status(404).json({ error: 'Site not found' });
     return;
@@ -76,26 +77,33 @@ router.post('/', async (req: Request, res: Response) => {
     // Parse sections from full markdown
     const sections = parseSections(result.full_markdown || '');
 
-    const insertId = sqlite.prepare(`
+    const insertResult = await execute(`
       INSERT INTO briefings (domain, created_at, provider, model, agency_identity, website_purpose,
         policy_objectives, recent_milestones, website_role, references_json, full_markdown,
         prompt_tokens, completion_tokens, duration_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      domain, now, provider, result.model || null,
-      sections.agency_identity || null,
-      sections.website_purpose || null,
-      sections.policy_objectives || null,
-      sections.recent_milestones || null,
-      sections.website_role || null,
-      JSON.stringify(verifiedRefs),
-      result.full_markdown || null,
-      result.prompt_tokens || null,
-      result.completion_tokens || null,
+      VALUES (:domain, :created_at, :provider, :model, :agency_identity, :website_purpose,
+        :policy_objectives, :recent_milestones, :website_role, :references_json, :full_markdown,
+        :prompt_tokens, :completion_tokens, :duration_ms)
+      RETURNING id
+    `, {
+      domain,
+      created_at:        now,
+      provider,
+      model:             result.model             || null,
+      agency_identity:   sections.agency_identity  || null,
+      website_purpose:   sections.website_purpose  || null,
+      policy_objectives: sections.policy_objectives || null,
+      recent_milestones: sections.recent_milestones || null,
+      website_role:      sections.website_role      || null,
+      references_json:   JSON.stringify(verifiedRefs),
+      full_markdown:     result.full_markdown       || null,
+      prompt_tokens:     result.prompt_tokens       || null,
+      completion_tokens: result.completion_tokens   || null,
       duration_ms,
-    ).lastInsertRowid;
+    });
 
-    const briefing = sqlite.prepare('SELECT * FROM briefings WHERE id = ?').get(insertId);
+    const insertId = Number(insertResult.rows[0].id);
+    const briefing = (await query('SELECT * FROM briefings WHERE id = $1', [insertId]))[0];
     res.json(briefing);
 
   } catch (err: any) {

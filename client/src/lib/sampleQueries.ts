@@ -27,22 +27,22 @@ ORDER BY uswds_count DESC;`,
   bureau,
   COUNT(*) as total,
   SUM(CASE WHEN uswds_count > 0 THEN 1 ELSE 0 END) as has_uswds,
-  ROUND(100.0 * SUM(CASE WHEN uswds_count > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) as uswds_pct,
-  ROUND(AVG(uswds_count), 1) as avg_uswds_score
+  ROUND((100.0 * SUM(CASE WHEN uswds_count > 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0))::NUMERIC, 1) as uswds_pct,
+  ROUND(AVG(uswds_count)::NUMERIC, 1) as avg_uswds_score
 FROM sites
 WHERE bureau IS NOT NULL
 GROUP BY bureau
-HAVING total > 1
+HAVING COUNT(*) > 1
 ORDER BY uswds_pct DESC;`,
   },
   {
     label: 'Top third-party domains (across all sites)',
     sql: `SELECT
-  value as third_party_domain,
-  COUNT(DISTINCT s.domain) as site_count
-FROM sites s, json_each(s.third_party_service_domains)
+  elem AS third_party_domain,
+  COUNT(DISTINCT s.domain) AS site_count
+FROM sites s, jsonb_array_elements_text(s.third_party_service_domains::jsonb) AS elem
 WHERE s.third_party_service_domains IS NOT NULL
-GROUP BY value
+GROUP BY elem
 ORDER BY site_count DESC
 LIMIT 20;`,
   },
@@ -60,7 +60,7 @@ ORDER BY status_code, agency;`,
   COUNT(*) as total,
   SUM(https_enforced) as https_count,
   SUM(hsts) as hsts_count,
-  ROUND(100.0 * SUM(https_enforced) / COUNT(*), 1) as https_pct
+  ROUND((100.0 * SUM(https_enforced) / NULLIF(COUNT(*), 0))::NUMERIC, 1) as https_pct
 FROM sites
 GROUP BY agency
 ORDER BY https_pct ASC;`,
@@ -81,20 +81,23 @@ ORDER BY sitemap_xml_count DESC;`,
   },
   {
     label: 'USWDS class list for a specific domain',
-    sql: `SELECT value as css_class
-FROM sites, json_each(uswds_usa_class_list)
+    sql: `SELECT elem AS css_class
+FROM sites, jsonb_array_elements_text(uswds_usa_class_list::jsonb) AS elem
 WHERE domain = 'www.va.gov'
-ORDER BY value;`,
+ORDER BY elem;`,
   },
   {
     label: 'Recently scanned sites (last 30 days)',
     sql: `SELECT domain, agency, scan_date, status_code, live
 FROM sites
-WHERE scan_date > datetime('now', '-30 days')
+WHERE scan_date > to_char(NOW() - INTERVAL '30 days', 'YYYY-MM-DD')
 ORDER BY scan_date DESC;`,
   },
   {
-    label: 'Database table schema',
-    sql: `PRAGMA table_info(sites);`,
+    label: 'Sites table columns',
+    sql: `SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'sites'
+ORDER BY ordinal_position;`,
   },
 ];

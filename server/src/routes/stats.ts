@@ -1,63 +1,61 @@
 import { Router, Request, Response } from 'express';
-import { sqlite } from '../db';
+import { query } from '../db';
 import { config } from '../config';
 
 const router = Router();
 
-router.get('/', (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   const agency = (req.query.agency as string) || '';
   const bureau = (req.query.bureau as string) || '';
 
-  // Build a WHERE clause fragment for the optional filter
+  // Build a WHERE clause fragment for the optional filter using named params
   const conditions: string[] = [];
-  const bindings: string[] = [];
-  if (agency) { conditions.push('agency = ?'); bindings.push(agency); }
-  if (bureau) { conditions.push('bureau = ?'); bindings.push(bureau); }
+  const params: Record<string, unknown> = {};
+  if (agency) { conditions.push('agency = :agency'); params.agency = agency; }
+  if (bureau) { conditions.push('bureau = :bureau'); params.bureau = bureau; }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  const q = (sql: string) => (sqlite.prepare(sql).get(...bindings) as any);
-  const qa = (sql: string, extra?: string[]) =>
-    sqlite.prepare(sql).all(...bindings, ...(extra ?? [])) as any[];
+  // Async helper — COUNT(*) returns as string in PostgreSQL, cast with Number()
+  const qn = async (sql: string) => Number((await query(sql, params))[0]?.n ?? 0);
 
-  const total = q(`SELECT COUNT(*) as n FROM sites ${where}`).n;
-  const live = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} live = 1`).n;
-  const uswds_any = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} uswds_count > 0`).n;
-  const dap_count = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} dap = 1`).n;
-  const https_enforced = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} https_enforced = 1`).n;
-  const sitemap_detected = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} sitemap_xml_detected = 1`).n;
-  const sitemap_not_detected = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} sitemap_xml_detected = 0`).n;
+  const total              = await qn(`SELECT COUNT(*) as n FROM sites ${where}`);
+  const live               = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} live = 1`);
+  const uswds_any          = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} uswds_count > 0`);
+  const dap_count          = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} dap = 1`);
+  const https_enforced     = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} https_enforced = 1`);
+  const sitemap_detected   = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} sitemap_xml_detected = 1`);
+  const sitemap_not_detected = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} sitemap_xml_detected = 0`);
 
-  const by_agency = sqlite.prepare(
+  const by_agency = await query(
     `SELECT agency, COUNT(*) as count FROM sites WHERE agency IS NOT NULL GROUP BY agency ORDER BY count DESC`
-  ).all();
+  );
 
-  const bureauWhere = agency ? 'WHERE agency = ? AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
-  const by_bureau = sqlite.prepare(`
+  // ROUND with two args requires NUMERIC in PostgreSQL — cast explicitly
+  const bureauWhere = agency ? 'WHERE agency = :agency AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
+  const by_bureau = await query(`
     SELECT bureau,
       COUNT(*) as count,
-      ROUND(AVG(uswds_count), 1) as uswds_avg,
-      ROUND(100.0 * SUM(CASE WHEN dap = 1 THEN 1 ELSE 0 END) / COUNT(*), 1) as dap_pct
+      ROUND(AVG(uswds_count)::NUMERIC, 1) as uswds_avg,
+      ROUND((100.0 * SUM(CASE WHEN dap = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0))::NUMERIC, 1) as dap_pct
     FROM sites ${bureauWhere}
     GROUP BY bureau ORDER BY count DESC LIMIT 30
-  `).all(...(agency ? [agency] : []));
+  `, agency ? { agency } : {});
 
-  // Top third-party domains using json_each — filtered by scope
-  const tpWhere = conditions.length
-    ? `WHERE ${conditions.map(c => `s.${c}`).join(' AND ')} AND s.third_party_service_domains IS NOT NULL`
-    : 'WHERE s.third_party_service_domains IS NOT NULL';
-  const top_third_party = sqlite.prepare(`
-    SELECT value as domain, COUNT(DISTINCT s.domain) as site_count
-    FROM sites s, json_each(s.third_party_service_domains)
-    ${tpWhere}
-    GROUP BY value ORDER BY site_count DESC LIMIT 15
-  `).all(...bindings);
+  // Top third-party domains — json_each (SQLite) → jsonb_array_elements_text (PostgreSQL)
+  const tpConditions = [...conditions.map(c => `s.${c}`), 's.third_party_service_domains IS NOT NULL'];
+  const top_third_party = await query(`
+    SELECT elem AS domain, COUNT(DISTINCT s.domain) AS site_count
+    FROM sites s, jsonb_array_elements_text(s.third_party_service_domains::jsonb) AS elem
+    WHERE ${tpConditions.join(' AND ')}
+    GROUP BY elem ORDER BY site_count DESC LIMIT 15
+  `, params);
 
-  const bureauSiteWhere = agency ? 'WHERE agency = ? AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
-  const by_bureau_sites = sqlite.prepare(`
+  const bureauSiteWhere = agency ? 'WHERE agency = :agency AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
+  const by_bureau_sites = await query(`
     SELECT bureau, COUNT(*) as count
     FROM sites ${bureauSiteWhere}
     GROUP BY bureau ORDER BY count DESC LIMIT 10
-  `).all(...(agency ? [agency] : []));
+  `, agency ? { agency } : {});
 
   const pct = (n: number) => total > 0 ? Math.round((n / total) * 1000) / 10 : 0;
 
@@ -109,34 +107,35 @@ router.post('/summarize', async (req: Request, res: Response) => {
 
   // Re-run stats query for the requested scope
   const conditions: string[] = [];
-  const bindings: string[] = [];
-  if (agency) { conditions.push('agency = ?'); bindings.push(agency); }
-  if (bureau) { conditions.push('bureau = ?'); bindings.push(bureau); }
+  const params: Record<string, unknown> = {};
+  if (agency) { conditions.push('agency = :agency'); params.agency = agency; }
+  if (bureau) { conditions.push('bureau = :bureau'); params.bureau = bureau; }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const q = (sql: string) => (sqlite.prepare(sql).get(...bindings) as any);
+  const qn = async (sql: string) => Number((await query(sql, params))[0]?.n ?? 0);
 
-  const total = q(`SELECT COUNT(*) as n FROM sites ${where}`).n;
-  const live = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} live = 1`).n;
-  const uswds = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} uswds_count > 0`).n;
-  const dap = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} dap = 1`).n;
-  const https_enforced = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} https_enforced = 1`).n;
-  const sitemap = q(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} sitemap_xml_detected = 1`).n;
+  const total          = await qn(`SELECT COUNT(*) as n FROM sites ${where}`);
+  const live           = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} live = 1`);
+  const uswds          = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} uswds_count > 0`);
+  const dap            = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} dap = 1`);
+  const https_enforced = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} https_enforced = 1`);
+  const sitemap        = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} sitemap_xml_detected = 1`);
   const pct = (n: number) => total > 0 ? Math.round((n / total) * 1000) / 10 : 0;
 
-  const bureauWhere = agency ? 'WHERE agency = ? AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
-  const topBureaus = (sqlite.prepare(`
+  const bureauWhere = agency ? 'WHERE agency = :agency AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
+  const topBureauRows = await query<any>(`
     SELECT bureau, COUNT(*) as count FROM sites ${bureauWhere}
     GROUP BY bureau ORDER BY count DESC LIMIT 8
-  `).all(...(agency ? [agency] : [])) as any[]).map((b: any) => `${b.bureau} (${b.count})`).join(', ');
+  `, agency ? { agency } : {});
+  const topBureaus = topBureauRows.map((b: any) => `${b.bureau} (${b.count})`).join(', ');
 
-  const tpWhere = conditions.length
-    ? `WHERE ${conditions.map(c => `s.${c}`).join(' AND ')} AND s.third_party_service_domains IS NOT NULL`
-    : 'WHERE s.third_party_service_domains IS NOT NULL';
-  const topTp = (sqlite.prepare(`
-    SELECT value as domain, COUNT(DISTINCT s.domain) as site_count
-    FROM sites s, json_each(s.third_party_service_domains) ${tpWhere}
-    GROUP BY value ORDER BY site_count DESC LIMIT 8
-  `).all(...bindings) as any[]).map((d: any) => d.domain).join(', ');
+  const tpConditions = [...conditions.map(c => `s.${c}`), 's.third_party_service_domains IS NOT NULL'];
+  const topTpRows = await query<any>(`
+    SELECT elem AS domain, COUNT(DISTINCT s.domain) AS site_count
+    FROM sites s, jsonb_array_elements_text(s.third_party_service_domains::jsonb) AS elem
+    WHERE ${tpConditions.join(' AND ')}
+    GROUP BY elem ORDER BY site_count DESC LIMIT 8
+  `, params);
+  const topTp = topTpRows.map((d: any) => d.domain).join(', ');
 
   const scope = [agency && `Agency: ${agency}`, bureau && `Bureau: ${bureau}`].filter(Boolean).join(', ') || 'all agencies';
   const statsText = [
