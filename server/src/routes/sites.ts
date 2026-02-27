@@ -114,8 +114,16 @@ router.put('/:domain', async (req: Request, res: Response) => {
   safeUpdates.updated_at = new Date().toISOString();
   safeUpdates.domain = domain;
 
-  const cols = Object.keys(safeUpdates).filter(k => k !== 'domain');
-  const setClause = cols.map(k => `${k} = :${k}`).join(', ');
+  // Only allow valid SQL identifiers (letters, digits, underscores) as column
+  // names — prevents injection through keys like `x = 1; DROP TABLE sites --`.
+  // Double-quote each name so PostgreSQL treats it as an identifier, not syntax.
+  const IDENTIFIER_RE = /^[a-z_][a-z0-9_]*$/i;
+  const cols = Object.keys(safeUpdates).filter(k => k !== 'domain' && IDENTIFIER_RE.test(k));
+  if (cols.length === 0) {
+    res.status(400).json({ error: 'No valid fields to update' });
+    return;
+  }
+  const setClause = cols.map(k => `"${k}" = :${k}`).join(', ');
 
   await execute(`UPDATE sites SET ${setClause} WHERE domain = :domain`, safeUpdates);
 

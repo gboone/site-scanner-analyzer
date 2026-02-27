@@ -289,6 +289,10 @@ router.post('/', async (req: Request, res: Response) => {
     existingDomains.add(site.domain); // track dupes within the same payload
   }
 
+  const total = validSites.length;
+  const startTime = Date.now();
+  console.log(`[import] started — ${total} valid records (${result.errors.length} skipped), batch size 100`);
+
   // Process in batches of 100 — each batch is one atomic transaction
   const BATCH_SIZE = 100;
   for (let i = 0; i < validSites.length; i += BATCH_SIZE) {
@@ -307,7 +311,17 @@ router.post('/', async (req: Request, res: Response) => {
     } catch (err: any) {
       result.errors.push(`Batch error (rows ${i}–${i + batch.length - 1}): ${err.message}`);
     }
+
+    // Log progress every 1,000 records so VIP logs show the import is still running
+    const processed = Math.min(i + BATCH_SIZE, total);
+    if (processed % 1000 === 0 || processed === total) {
+      const pct = Math.round((processed / total) * 100);
+      console.log(`[import] ${processed}/${total} (${pct}%) — inserted: ${result.inserted}, updated: ${result.updated}, errors: ${result.errors.length}`);
+    }
   }
+
+  const duration_ms = Date.now() - startTime;
+  console.log(`[import] complete in ${(duration_ms / 1000).toFixed(1)}s — inserted: ${result.inserted}, updated: ${result.updated}, errors: ${result.errors.length}`);
 
   res.json(result);
 });

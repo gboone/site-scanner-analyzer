@@ -14,6 +14,7 @@ import proxyRouter from './routes/proxy';
 import gsaRouter from './routes/gsa';
 import briefingsRouter from './routes/briefings';
 import { agenciesRouter, bureausRouter } from './routes/agencies';
+import { validateUrlForSsrf } from './middleware/ssrf-protection';
 
 const app = express();
 
@@ -110,6 +111,11 @@ async function main() {
   app.put('/api/v1/settings/:key', async (req, res) => {
     const { key } = req.params;
     const { value } = req.body;
+    // Only allow the keys that map to known config values — reject anything else.
+    if (!configMap[key]) {
+      res.status(400).json({ error: `Unknown setting key: ${key}` });
+      return;
+    }
     await execute(
       `INSERT INTO settings (key, value)
        VALUES (:key, :value)
@@ -129,6 +135,13 @@ async function main() {
   app.get('/api/v1/settings/test-glean', async (_req, res) => {
     if (!config.gleanEndpoint || !config.gleanApiKey) {
       res.json({ connected: false, reason: 'Glean endpoint and API key not configured' });
+      return;
+    }
+    // Guard against SSRF — the endpoint URL may have been set via the settings UI,
+    // not just env vars, so we must validate it before fetching.
+    const ssrfError = await validateUrlForSsrf(config.gleanEndpoint);
+    if (ssrfError) {
+      res.status(403).json({ connected: false, reason: ssrfError });
       return;
     }
     try {

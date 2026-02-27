@@ -98,7 +98,11 @@ export default function SettingsView() {
     setGsaImportErrors([]);
     setGsaImportErrorCount(0);
     try {
-      const r = await api.importFromGSA(gsaAgency.trim() || undefined) as any;
+      const r = await api.importFromGSA(gsaAgency.trim() || undefined, (progress) => {
+        setGsaImportStatus(
+          `Fetching page ${progress.page} of ${progress.totalPages}… (${progress.inserted} new, ${progress.updated} updated)`
+        );
+      }) as any;
       const totalErrors: number = r.error_count ?? r.errors?.length ?? 0;
       setGsaImportStatus(
         `✓ Imported ${r.inserted} new, ${r.updated} updated of ${r.total_sites} total (${r.pages_fetched} pages)` +

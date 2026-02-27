@@ -44,6 +44,41 @@ function isPrivateIp(address: string): boolean {
   return false;
 }
 
+// Programmatic SSRF check — returns an error string, or null if the URL is safe.
+// Use this wherever you need to validate a URL outside of Express middleware
+// (e.g. before fetching a user-supplied endpoint like the Glean API URL).
+export async function validateUrlForSsrf(url: string): Promise<string | null> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'Invalid URL format';
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    return 'Only HTTP and HTTPS protocols are allowed';
+  }
+
+  const hostname = parsed.hostname;
+  const blockedHostnames = ['localhost', 'metadata.google.internal', '169.254.169.254'];
+  if (blockedHostnames.includes(hostname.toLowerCase())) {
+    return 'SSRF protection: blocked hostname';
+  }
+
+  try {
+    const addresses = await dns.lookup(hostname, { all: true, family: 0 });
+    for (const { address } of addresses) {
+      if (isPrivateIp(address)) {
+        return `SSRF protection: private IP address blocked (${address})`;
+      }
+    }
+  } catch {
+    return 'Could not resolve hostname';
+  }
+
+  return null; // safe
+}
+
 export async function ssrfProtection(req: Request, res: Response, next: NextFunction): Promise<void> {
   const { url } = req.body as { url?: string };
 
