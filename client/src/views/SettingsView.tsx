@@ -207,7 +207,7 @@ export default function SettingsView() {
           </div>
           {gsaImportStatus && (
             <div className="mt-2">
-              <div className={`text-xs ${gsaImportStatus.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>
+              <div className={`text-xs ${gsaImportStatus.startsWith('✓') ? 'text-green-600' : gsaImporting ? 'text-gray-500' : 'text-red-600'}`}>
                 {gsaImportStatus}
               </div>
               {gsaImportErrors.length > 0 && (
