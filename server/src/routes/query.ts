@@ -1,10 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { query } from '../db';
+import { pool } from '../db';
 
 const router = Router();
 
-// Only SELECT queries allowed (PRAGMA is SQLite-specific and not available in PostgreSQL)
-const FORBIDDEN = /^\s*(drop|delete|insert|update|create|alter|attach|detach|reindex|vacuum|with\s+.*\s+(delete|insert|update))/i;
+// Fast-fail UX hint: only SELECT-shaped queries get through.
+// The real enforcement is PostgreSQL's READ ONLY transaction mode below —
+// it rejects writes at the engine level, bypassing any regex tricks.
 const ALLOWED = /^\s*select/i;
 
 router.post('/', async (req: Request, res: Response) => {
@@ -16,22 +17,27 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   const trimmed = sql.trim();
-  if (FORBIDDEN.test(trimmed)) {
-    res.status(400).json({ error: 'Only SELECT queries are allowed' });
-    return;
-  }
   if (!ALLOWED.test(trimmed)) {
     res.status(400).json({ error: 'Only SELECT queries are allowed' });
     return;
   }
 
+  // Acquire a dedicated client and run inside a READ ONLY transaction.
+  // PostgreSQL will reject any write statement (INSERT/UPDATE/DELETE/DROP/…)
+  // at the engine level, regardless of SQL tricks like comments or semicolons.
+  const client = await pool.connect();
   const start = Date.now();
   try {
-    const rows = await query(trimmed);
+    await client.query('BEGIN READ ONLY');
+    const result = await client.query(trimmed);
+    await client.query('ROLLBACK'); // no writes to commit; ROLLBACK is a clean exit
     const duration_ms = Date.now() - start;
-    res.json({ rows, count: rows.length, duration_ms });
+    res.json({ rows: result.rows, count: result.rows.length, duration_ms });
   } catch (err: any) {
+    await client.query('ROLLBACK').catch(() => {});
     res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
