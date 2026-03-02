@@ -7,7 +7,7 @@ const router = Router();
 router.get('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
   const history = await query(
-    'SELECT * FROM scan_history WHERE domain = $1 ORDER BY scanned_at DESC LIMIT 50',
+    'SELECT * FROM scan_history WHERE domain = ? ORDER BY scanned_at DESC LIMIT 50',
     [domain]
   );
   res.json(history);
@@ -26,12 +26,12 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  const existing = (await query('SELECT domain FROM sites WHERE domain = $1', [domain]))[0];
+  const existing = (await query('SELECT domain FROM sites WHERE domain = ?', [domain]))[0];
   if (!existing) {
     // Auto-create a minimal stub so newly-added domains can be scanned in
     // without requiring a prior GSA import. The scan result will fill the rest.
     await execute(
-      'INSERT INTO sites (domain) VALUES ($1) ON CONFLICT (domain) DO NOTHING',
+      'INSERT IGNORE INTO sites (domain) VALUES (?)',
       [domain]
     );
   }
@@ -42,7 +42,6 @@ router.post('/', async (req: Request, res: Response) => {
   const scanInsert = await execute(`
     INSERT INTO scan_history (domain, scanned_at, status, redirect_chain, sitemap_result, robots_result, tech_stack, dns_records, diff_summary, error_log, duration_ms)
     VALUES (:domain, :scanned_at, :status, :redirect_chain, :sitemap_result, :robots_result, :tech_stack, :dns_records, :diff_summary, :error_log, :duration_ms)
-    RETURNING id
   `, {
     domain,
     scanned_at: now,
@@ -56,7 +55,7 @@ router.post('/', async (req: Request, res: Response) => {
     error_log:       scan_result.errors         ? JSON.stringify(scan_result.errors)          : null,
     duration_ms:     scan_result.duration_ms    ?? null,
   });
-  const scanId = Number(scanInsert.rows[0].id);
+  const scanId = scanInsert.insertId;
 
   // Auto-apply tech data to sites table
   const updates: Record<string, unknown> = { updated_at: now };

@@ -7,7 +7,7 @@ const router = Router();
 // GET /api/v1/briefings/export/:id — registered BEFORE /:domain to prevent "export" matching as a domain name
 router.get('/export/:id', async (req: Request, res: Response) => {
   const id = parseInt(String(req.params.id));
-  const briefing = (await query<any>('SELECT * FROM briefings WHERE id = $1', [id]))[0];
+  const briefing = (await query<any>('SELECT * FROM briefings WHERE id = ?', [id]))[0];
   if (!briefing) {
     res.status(404).json({ error: 'Briefing not found' });
     return;
@@ -21,7 +21,7 @@ router.get('/export/:id', async (req: Request, res: Response) => {
 router.get('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
   const briefings = await query(
-    'SELECT * FROM briefings WHERE domain = $1 ORDER BY created_at DESC',
+    'SELECT * FROM briefings WHERE domain = ? ORDER BY created_at DESC',
     [domain]
   );
   res.json(briefings);
@@ -40,7 +40,7 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  const site = (await query<any>('SELECT * FROM sites WHERE domain = $1', [domain]))[0];
+  const site = (await query<any>('SELECT * FROM sites WHERE domain = ?', [domain]))[0];
   if (!site) {
     res.status(404).json({ error: 'Site not found' });
     return;
@@ -84,7 +84,6 @@ router.post('/', async (req: Request, res: Response) => {
       VALUES (:domain, :created_at, :provider, :model, :agency_identity, :website_purpose,
         :policy_objectives, :recent_milestones, :website_role, :references_json, :full_markdown,
         :prompt_tokens, :completion_tokens, :duration_ms)
-      RETURNING id
     `, {
       domain,
       created_at:        now,
@@ -102,8 +101,8 @@ router.post('/', async (req: Request, res: Response) => {
       duration_ms,
     });
 
-    const insertId = Number(insertResult.rows[0].id);
-    const briefing = (await query('SELECT * FROM briefings WHERE id = $1', [insertId]))[0];
+    const insertId = insertResult.insertId;
+    const briefing = (await query('SELECT * FROM briefings WHERE id = ?', [insertId]))[0];
     res.json(briefing);
 
   } catch (err: any) {

@@ -26,8 +26,7 @@ router.get('/', async (req: Request, res: Response) => {
   const params: Record<string, unknown> = {};
 
   if (search) {
-    // ILIKE for case-insensitive search in PostgreSQL
-    conditions.push('(domain ILIKE :search OR agency ILIKE :search OR bureau ILIKE :search OR title ILIKE :search)');
+    conditions.push('(domain LIKE :search OR agency LIKE :search OR bureau LIKE :search OR title LIKE :search)');
     params.search = `%${search}%`;
   }
 
@@ -50,7 +49,7 @@ router.get('/', async (req: Request, res: Response) => {
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // pg returns COUNT(*) as a string — cast to Number
+  // COUNT(*) may be returned as a string — cast to Number
   const countRows = await query<{ count: string }>(`SELECT COUNT(*) as count FROM sites ${where}`, params);
   const total = Number(countRows[0].count);
 
@@ -71,7 +70,7 @@ router.get('/', async (req: Request, res: Response) => {
 // GET /api/v1/sites/:domain - single site with scan history
 router.get('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
-  const site = (await query('SELECT * FROM sites WHERE domain = $1', [domain]))[0];
+  const site = (await query('SELECT * FROM sites WHERE domain = ?', [domain]))[0];
 
   if (!site) {
     res.status(404).json({ error: 'Site not found' });
@@ -79,12 +78,12 @@ router.get('/:domain', async (req: Request, res: Response) => {
   }
 
   const scanHistory = await query(
-    'SELECT * FROM scan_history WHERE domain = $1 ORDER BY scanned_at DESC LIMIT 20',
+    'SELECT * FROM scan_history WHERE domain = ? ORDER BY scanned_at DESC LIMIT 20',
     [domain]
   );
 
   const briefings = await query(
-    'SELECT id, domain, created_at, provider, model, full_markdown FROM briefings WHERE domain = $1 ORDER BY created_at DESC LIMIT 5',
+    'SELECT id, domain, created_at, provider, model, full_markdown FROM briefings WHERE domain = ? ORDER BY created_at DESC LIMIT 5',
     [domain]
   );
 
@@ -96,7 +95,7 @@ router.put('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
   const updates = req.body as Record<string, unknown>;
 
-  const existing = (await query('SELECT domain FROM sites WHERE domain = $1', [domain]))[0];
+  const existing = (await query('SELECT domain FROM sites WHERE domain = ?', [domain]))[0];
   if (!existing) {
     res.status(404).json({ error: 'Site not found' });
     return;
@@ -116,18 +115,17 @@ router.put('/:domain', async (req: Request, res: Response) => {
 
   // Only allow valid SQL identifiers (letters, digits, underscores) as column
   // names — prevents injection through keys like `x = 1; DROP TABLE sites --`.
-  // Double-quote each name so PostgreSQL treats it as an identifier, not syntax.
   const IDENTIFIER_RE = /^[a-z_][a-z0-9_]*$/i;
   const cols = Object.keys(safeUpdates).filter(k => k !== 'domain' && IDENTIFIER_RE.test(k));
   if (cols.length === 0) {
     res.status(400).json({ error: 'No valid fields to update' });
     return;
   }
-  const setClause = cols.map(k => `"${k}" = :${k}`).join(', ');
+  const setClause = cols.map(k => `\`${k}\` = :${k}`).join(', ');
 
   await execute(`UPDATE sites SET ${setClause} WHERE domain = :domain`, safeUpdates);
 
-  const updated = (await query('SELECT * FROM sites WHERE domain = $1', [domain]))[0];
+  const updated = (await query('SELECT * FROM sites WHERE domain = ?', [domain]))[0];
   res.json(updated);
 });
 

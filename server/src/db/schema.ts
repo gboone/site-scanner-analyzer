@@ -1,9 +1,11 @@
-import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core';
+import { mysqlTable, varchar, text, int, double, index } from 'drizzle-orm/mysql-core';
 import { sql } from 'drizzle-orm';
 
-export const sites = sqliteTable('sites', {
+const TS_DEFAULT = sql`(DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ'))`;
+
+export const sites = mysqlTable('sites', {
   // Core identification
-  domain: text('domain').primaryKey(),
+  domain: varchar('domain', { length: 255 }).primaryKey(),
   name: text('name'),
   url: text('url'),
   base_domain: text('base_domain'),
@@ -14,13 +16,13 @@ export const sites = sqliteTable('sites', {
   top_level_domain: text('top_level_domain'),
 
   // Status
-  redirect: integer('redirect', { mode: 'boolean' }),
-  live: integer('live', { mode: 'boolean' }),
-  status_code: integer('status_code'),
+  redirect: int('redirect'),
+  live: int('live'),
+  status_code: int('status_code'),
   media_type: text('media_type'),
   page_hash: text('page_hash'),
   scan_date: text('scan_date'),
-  test_404: integer('test_404', { mode: 'boolean' }),
+  test_404: int('test_404'),
 
   // Organization
   agency: text('agency'),
@@ -39,21 +41,21 @@ export const sites = sqliteTable('sites', {
   www_scan_status: text('www_scan_status'),
 
   // Analytics
-  pageviews: integer('pageviews'),
-  dap: integer('dap', { mode: 'boolean' }),
+  pageviews: int('pageviews'),
+  dap: int('dap'),
   dap_parameters: text('dap_parameters'), // JSON
   dap_version: text('dap_version'),
   ga_tag_id: text('ga_tag_id'),
   search_dot_gov: text('search_dot_gov'),
 
   // Technical
-  ipv6: integer('ipv6', { mode: 'boolean' }),
+  ipv6: int('ipv6'),
   hostname: text('hostname'),
   cms: text('cms'),
   login_provider: text('login_provider'),
-  site_search: integer('site_search', { mode: 'boolean' }),
-  viewport_meta_tag: integer('viewport_meta_tag', { mode: 'boolean' }),
-  main_element_present: integer('main_element_present', { mode: 'boolean' }),
+  site_search: int('site_search'),
+  viewport_meta_tag: int('viewport_meta_tag'),
+  main_element_present: int('main_element_present'),
   language: text('language'),
   language_link: text('language_link'),
   cumulative_layout_shift: text('cumulative_layout_shift'),
@@ -75,58 +77,58 @@ export const sites = sqliteTable('sites', {
   required_links_text: text('required_links_text'),  // JSON array
 
   // Third-party services
-  third_party_service_count: integer('third_party_service_count'),
+  third_party_service_count: int('third_party_service_count'),
   third_party_service_domains: text('third_party_service_domains'), // JSON array
   third_party_service_urls: text('third_party_service_urls'),       // JSON array
   cookie_domains: text('cookie_domains'),                            // JSON array
   source_list: text('source_list'),                                  // JSON array
 
   // Robots.txt
-  robots_txt_detected: integer('robots_txt_detected', { mode: 'boolean' }),
+  robots_txt_detected: int('robots_txt_detected'),
   robots_txt_url: text('robots_txt_url'),
-  robots_txt_status_code: integer('robots_txt_status_code'),
+  robots_txt_status_code: int('robots_txt_status_code'),
   robots_txt_media_type: text('robots_txt_media_type'),
-  robots_txt_filesize: integer('robots_txt_filesize'),
-  robots_txt_crawl_delay: real('robots_txt_crawl_delay'),
+  robots_txt_filesize: int('robots_txt_filesize'),
+  robots_txt_crawl_delay: double('robots_txt_crawl_delay'),
   robots_txt_sitemap_locations: text('robots_txt_sitemap_locations'), // JSON array
 
   // Sitemap
-  sitemap_xml_detected: integer('sitemap_xml_detected', { mode: 'boolean' }),
+  sitemap_xml_detected: int('sitemap_xml_detected'),
   sitemap_xml_url: text('sitemap_xml_url'),
-  sitemap_xml_status_code: integer('sitemap_xml_status_code'),
+  sitemap_xml_status_code: int('sitemap_xml_status_code'),
   sitemap_xml_media_type: text('sitemap_xml_media_type'),
-  sitemap_xml_filesize: integer('sitemap_xml_filesize'),
-  sitemap_xml_count: integer('sitemap_xml_count'),
+  sitemap_xml_filesize: int('sitemap_xml_filesize'),
+  sitemap_xml_count: int('sitemap_xml_count'),
   sitemap_xml_lastmod: text('sitemap_xml_lastmod'),
-  sitemap_xml_pdf_count: integer('sitemap_xml_pdf_count'),
+  sitemap_xml_pdf_count: int('sitemap_xml_pdf_count'),
   sitemap_xml_page_hash: text('sitemap_xml_page_hash'),
 
-  // USWDS (11 fields)
-  uswds_favicon: integer('uswds_favicon'),
-  uswds_favicon_in_css: integer('uswds_favicon_in_css'),
-  uswds_publicsans_font: integer('uswds_publicsans_font'),
-  uswds_inpage_css: integer('uswds_inpage_css'),
-  uswds_string: integer('uswds_string'),
-  uswds_string_in_css: integer('uswds_string_in_css'),
-  uswds_version: integer('uswds_version'),
-  uswds_count: integer('uswds_count'),
-  uswds_usa_classes: integer('uswds_usa_classes'),
+  // USWDS
+  uswds_favicon: int('uswds_favicon'),
+  uswds_favicon_in_css: int('uswds_favicon_in_css'),
+  uswds_publicsans_font: int('uswds_publicsans_font'),
+  uswds_inpage_css: int('uswds_inpage_css'),
+  uswds_string: int('uswds_string'),
+  uswds_string_in_css: int('uswds_string_in_css'),
+  uswds_version: int('uswds_version'),
+  uswds_count: int('uswds_count'),
+  uswds_usa_classes: int('uswds_usa_classes'),
   uswds_usa_class_list: text('uswds_usa_class_list'), // JSON array
-  uswds_banner_heres_how: integer('uswds_banner_heres_how', { mode: 'boolean' }),
+  uswds_banner_heres_how: int('uswds_banner_heres_how'),
   uswds_semantic_version: text('uswds_semantic_version'),
 
   // Security
-  https_enforced: integer('https_enforced', { mode: 'boolean' }),
-  hsts: integer('hsts', { mode: 'boolean' }),
+  https_enforced: int('https_enforced'),
+  hsts: int('hsts'),
 
   // WWW check
   www_url: text('www_url'),
-  www_status_code: integer('www_status_code'),
+  www_status_code: int('www_status_code'),
   www_title: text('www_title'),
 
   // Local tracking
-  imported_at: text('imported_at').notNull().default(sql`(datetime('now'))`),
-  updated_at: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  imported_at: text('imported_at').notNull().default(TS_DEFAULT),
+  updated_at: text('updated_at').notNull().default(TS_DEFAULT),
 }, (table) => ({
   agencyIdx: index('idx_sites_agency').on(table.agency),
   bureauIdx: index('idx_sites_bureau').on(table.bureau),
@@ -136,9 +138,9 @@ export const sites = sqliteTable('sites', {
   sitemapIdx: index('idx_sites_sitemap').on(table.sitemap_xml_detected),
 }));
 
-export const scan_history = sqliteTable('scan_history', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  domain: text('domain').notNull().references(() => sites.domain, { onDelete: 'cascade' }),
+export const scan_history = mysqlTable('scan_history', {
+  id: int('id').primaryKey().autoincrement(),
+  domain: varchar('domain', { length: 255 }).notNull().references(() => sites.domain, { onDelete: 'cascade' }),
   scanned_at: text('scanned_at').notNull(),
   status: text('status').notNull(), // 'completed' | 'failed' | 'partial'
   redirect_chain: text('redirect_chain'),  // JSON
@@ -148,15 +150,15 @@ export const scan_history = sqliteTable('scan_history', {
   dns_records: text('dns_records'),        // JSON
   diff_summary: text('diff_summary'),      // JSON
   error_log: text('error_log'),            // JSON array
-  duration_ms: integer('duration_ms'),
+  duration_ms: int('duration_ms'),
 }, (table) => ({
   domainIdx: index('idx_scan_history_domain').on(table.domain),
   scannedAtIdx: index('idx_scan_history_scanned_at').on(table.scanned_at),
 }));
 
-export const briefings = sqliteTable('briefings', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  domain: text('domain').notNull().references(() => sites.domain, { onDelete: 'cascade' }),
+export const briefings = mysqlTable('briefings', {
+  id: int('id').primaryKey().autoincrement(),
+  domain: varchar('domain', { length: 255 }).notNull().references(() => sites.domain, { onDelete: 'cascade' }),
   created_at: text('created_at').notNull(),
   provider: text('provider').notNull(), // 'glean' | 'claude'
   model: text('model'),
@@ -167,15 +169,15 @@ export const briefings = sqliteTable('briefings', {
   website_role: text('website_role'),
   references_json: text('references_json'), // JSON array of BriefingReference
   full_markdown: text('full_markdown'),
-  prompt_tokens: integer('prompt_tokens'),
-  completion_tokens: integer('completion_tokens'),
-  duration_ms: integer('duration_ms'),
+  prompt_tokens: int('prompt_tokens'),
+  completion_tokens: int('completion_tokens'),
+  duration_ms: int('duration_ms'),
 }, (table) => ({
   domainIdx: index('idx_briefings_domain').on(table.domain),
 }));
 
-export const settings = sqliteTable('settings', {
-  key: text('key').primaryKey(),
+export const settings = mysqlTable('settings', {
+  key: varchar('key', { length: 255 }).primaryKey(),
   value: text('value'),
-  updated_at: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  updated_at: text('updated_at').notNull().default(TS_DEFAULT),
 });

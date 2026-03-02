@@ -119,9 +119,9 @@ async function main() {
     await execute(
       `INSERT INTO settings (key, value)
        VALUES (:key, :value)
-       ON CONFLICT (key) DO UPDATE SET
-         value      = EXCLUDED.value,
-         updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+       ON DUPLICATE KEY UPDATE
+         value      = VALUES(value),
+         updated_at = DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ')`,
       { key, value }
     );
     // Also update process.env so the running config picks it up immediately
