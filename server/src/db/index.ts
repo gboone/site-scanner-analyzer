@@ -1,36 +1,39 @@
-import pg from 'pg';
-import type { PoolClient } from 'pg';
+import mysql from 'mysql2/promise';
+import type { PoolConnection } from 'mysql2/promise';
 
-// Return timestamps as ISO strings rather than JS Date objects so the rest of
-// the app (which expects string values from SQLite) works without changes.
-pg.types.setTypeParser(pg.types.builtins.TIMESTAMPTZ, (val: string | null) =>
-  val ? new Date(val).toISOString() : null
-);
-pg.types.setTypeParser(pg.types.builtins.TIMESTAMP, (val: string | null) =>
-  val ? new Date(val).toISOString() : null
-);
+// Parse host and port from VIP_MARIADB_WRITE_HOSTS ("127.0.0.1:3306")
+function parseWriteHost(hosts?: string): { host: string; port: number } {
+  if (!hosts) return { host: 'localhost', port: 3306 };
+  const [host, portStr] = hosts.split(':');
+  return { host: host || 'localhost', port: portStr ? parseInt(portStr, 10) : 3306 };
+}
 
-export const pool = new pg.Pool({
-  host:     process.env.DB_HOST     ?? 'localhost',
-  port:     parseInt(process.env.DB_PORT ?? '5432'),
-  user:     process.env.DB_USER     ?? 'postgres',
-  password: process.env.DB_PASSWORD ?? '',
-  database: process.env.DB_NAME     ?? 'scanner',
-  max: 10,
-  ssl: process.env.DB_SSL === 'false' ? false : process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+const { host, port } = parseWriteHost(process.env.VIP_MARIADB_WRITE_HOSTS);
+
+export const pool = mysql.createPool({
+  host,
+  port,
+  user:            process.env.VIP_MARIADB_USER     ?? 'root',
+  password:        process.env.VIP_MARIADB_PASSWORD ?? '',
+  database:        process.env.VIP_MARIADB_NAME     ?? 'scanner',
+  connectionLimit: 10,
+  // Return date/time column values as strings (preserves existing ISO-string behavior)
+  dateStrings:     true,
+  supportBigNumbers: true,
+  bigNumberStrings:  false,
 });
 
 // ---------------------------------------------------------------------------
-// Convert :name → $1, $2, ... positional params (pg uses positional params)
+// Convert :name → ? positional params (mysql2 uses ? placeholders)
 // ---------------------------------------------------------------------------
 export function toPositional(
   sql: string,
   params: Record<string, unknown>
-): [string, unknown[]] {
-  const args: unknown[] = [];
+): [string, any[]] {
+  const args: any[] = [];
   const converted = sql.replace(/:(\w+)/g, (_, key) => {
     args.push(params[key]);
-    return `$${args.length}`;
+    return '?';
   });
   return [converted, args];
 }
@@ -40,45 +43,47 @@ export function toPositional(
 // ---------------------------------------------------------------------------
 export async function query<T = Record<string, unknown>>(
   sql: string,
-  args?: Record<string, unknown> | unknown[]
+  args?: Record<string, unknown> | any[]
 ): Promise<T[]> {
   if (args && !Array.isArray(args)) {
     const [s, a] = toPositional(sql, args);
-    return (await pool.query(s, a)).rows as T[];
+    const [rows] = await pool.execute(s, a);
+    return rows as T[];
   }
-  return (await pool.query(sql, (args as unknown[]) ?? [])).rows as T[];
+  const [rows] = await pool.execute(sql, (args as any[]) ?? []);
+  return rows as T[];
 }
 
 // ---------------------------------------------------------------------------
-// INSERT / UPDATE / DELETE helper — use RETURNING for auto-increment IDs
+// INSERT / UPDATE / DELETE helper
 // ---------------------------------------------------------------------------
 export async function execute(
   sql: string,
-  args?: Record<string, unknown> | unknown[]
-): Promise<{ rows: Record<string, unknown>[]; rowCount: number }> {
+  args?: Record<string, unknown> | any[]
+): Promise<{ rows: Record<string, unknown>[]; rowCount: number; insertId: number }> {
   if (args && !Array.isArray(args)) {
     const [s, a] = toPositional(sql, args);
-    const r = await pool.query(s, a);
-    return { rows: r.rows, rowCount: r.rowCount ?? 0 };
+    const [result] = await pool.execute(s, a) as any;
+    return { rows: [], rowCount: result.affectedRows ?? 0, insertId: result.insertId ?? 0 };
   }
-  const r = await pool.query(sql, (args as unknown[]) ?? []);
-  return { rows: r.rows, rowCount: r.rowCount ?? 0 };
+  const [result] = await pool.execute(sql, (args as any[]) ?? []) as any;
+  return { rows: [], rowCount: result.affectedRows ?? 0, insertId: result.insertId ?? 0 };
 }
 
 // ---------------------------------------------------------------------------
 // Transaction helper
 // ---------------------------------------------------------------------------
 export async function transaction<T>(
-  fn: (client: PoolClient) => Promise<T>
+  fn: (client: PoolConnection) => Promise<T>
 ): Promise<T> {
-  const client = await pool.connect();
+  const client = await pool.getConnection();
   try {
-    await client.query('BEGIN');
+    await client.beginTransaction();
     const result = await fn(client);
-    await client.query('COMMIT');
+    await client.commit();
     return result;
   } catch (e) {
-    await client.query('ROLLBACK');
+    await client.rollback();
     throw e;
   } finally {
     client.release();
@@ -89,17 +94,17 @@ export async function transaction<T>(
 // Schema bootstrap — idempotent, runs at startup
 // ---------------------------------------------------------------------------
 export async function initDb(): Promise<void> {
-  // Use ADD COLUMN IF NOT EXISTS — clean, no try/catch needed in PostgreSQL
+  // ADD COLUMN IF NOT EXISTS — supported in MariaDB 10.0.2+
   const addCol = async (col: string, type = 'TEXT') => {
-    await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS "${col}" ${type}`);
+    await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS \`${col}\` ${type}`);
   };
 
-  // ISO-format timestamp default for TEXT date columns
-  const TS_DEFAULT = `to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
+  // ISO-format UTC timestamp default for TEXT date columns (MariaDB 10.2+)
+  const TS_DEFAULT = `DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ')`;
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sites (
-      domain TEXT PRIMARY KEY,
+      domain VARCHAR(255) PRIMARY KEY,
       name TEXT,
       url TEXT,
       base_domain TEXT,
@@ -167,7 +172,7 @@ export async function initDb(): Promise<void> {
       robots_txt_status_code INTEGER,
       robots_txt_media_type TEXT,
       robots_txt_filesize INTEGER,
-      robots_txt_crawl_delay DOUBLE PRECISION,
+      robots_txt_crawl_delay DOUBLE,
       robots_txt_sitemap_locations TEXT,
       sitemap_xml_detected INTEGER,
       sitemap_xml_url TEXT,
@@ -209,8 +214,8 @@ export async function initDb(): Promise<void> {
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS scan_history (
-      id SERIAL PRIMARY KEY,
-      domain TEXT NOT NULL REFERENCES sites(domain) ON DELETE CASCADE,
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      domain VARCHAR(255) NOT NULL,
       scanned_at TEXT NOT NULL,
       status TEXT NOT NULL,
       redirect_chain TEXT,
@@ -220,7 +225,8 @@ export async function initDb(): Promise<void> {
       dns_records TEXT,
       diff_summary TEXT,
       error_log TEXT,
-      duration_ms INTEGER
+      duration_ms INTEGER,
+      FOREIGN KEY (domain) REFERENCES sites(domain) ON DELETE CASCADE
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_scan_history_domain     ON scan_history(domain)`);
@@ -228,8 +234,8 @@ export async function initDb(): Promise<void> {
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS briefings (
-      id SERIAL PRIMARY KEY,
-      domain TEXT NOT NULL REFERENCES sites(domain) ON DELETE CASCADE,
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      domain VARCHAR(255) NOT NULL,
       created_at TEXT NOT NULL,
       provider TEXT NOT NULL,
       model TEXT,
@@ -242,14 +248,15 @@ export async function initDb(): Promise<void> {
       full_markdown TEXT,
       prompt_tokens INTEGER,
       completion_tokens INTEGER,
-      duration_ms INTEGER
+      duration_ms INTEGER,
+      FOREIGN KEY (domain) REFERENCES sites(domain) ON DELETE CASCADE
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_briefings_domain ON briefings(domain)`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
+      \`key\` VARCHAR(255) PRIMARY KEY,
       value TEXT,
       updated_at TEXT NOT NULL DEFAULT (${TS_DEFAULT})
     )
@@ -297,7 +304,7 @@ export async function initDb(): Promise<void> {
   await addCol('sitemap_publishing_by_month');
   await addCol('sitemap_latest_update');
   await addCol('sitemap_has_clean_urls', 'INTEGER');
-  await addCol('sitemap_path_depth_avg', 'DOUBLE PRECISION');
+  await addCol('sitemap_path_depth_avg', 'DOUBLE');
   await addCol('wp_json_api_active', 'INTEGER');
   await addCol('wp_api_endpoints');
   await addCol('wp_post_count', 'INTEGER');
@@ -316,9 +323,9 @@ export async function initDb(): Promise<void> {
   await addCol('security_header_xss');
 
   // Clean up any null-domain rows from old broken imports
-  const deleted = await pool.query('DELETE FROM sites WHERE domain IS NULL');
-  if ((deleted.rowCount ?? 0) > 0) {
-    console.log(`  cleaned up ${deleted.rowCount} null-domain row(s) from previous import`);
+  const [deleted] = await pool.query('DELETE FROM sites WHERE domain IS NULL') as any;
+  if ((deleted.affectedRows ?? 0) > 0) {
+    console.log(`  cleaned up ${deleted.affectedRows} null-domain row(s) from previous import`);
   }
 
   console.log('✓ Database initialized');

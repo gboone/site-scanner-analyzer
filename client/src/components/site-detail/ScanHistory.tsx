@@ -10,7 +10,7 @@ export default function ScanHistory({ history, domain }: ScanHistoryProps) {
   if (history.length === 0) {
     return (
       <div className="p-8 text-center text-gray-400 text-sm">
-        <div className="text-3xl mb-3">📋</div>
+        <div className="text-3xl mb-3" aria-hidden="true">📋</div>
         <p>No re-scans yet.</p>
         <p className="text-xs mt-1">Use the Overview tab to run a re-scan.</p>
       </div>

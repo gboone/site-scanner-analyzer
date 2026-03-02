@@ -4,6 +4,20 @@ import { config } from '../config';
 
 const router = Router();
 
+// Simple in-memory rate limiter: max 10 AI summarizations per IP per 5 minutes
+const summarizeRateLimitMap = new Map<string, number[]>();
+const SUMMARIZE_RATE_LIMIT = 10;
+const SUMMARIZE_RATE_WINDOW_MS = 5 * 60 * 1000;
+
+function checkSummarizeRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const timestamps = (summarizeRateLimitMap.get(ip) ?? []).filter(t => now - t < SUMMARIZE_RATE_WINDOW_MS);
+  if (timestamps.length >= SUMMARIZE_RATE_LIMIT) return false;
+  timestamps.push(now);
+  summarizeRateLimitMap.set(ip, timestamps);
+  return true;
+}
+
 router.get('/', async (req: Request, res: Response) => {
   const agency = (req.query.agency as string) || '';
   const bureau = (req.query.bureau as string) || '';
@@ -30,24 +44,30 @@ router.get('/', async (req: Request, res: Response) => {
     `SELECT agency, COUNT(*) as count FROM sites WHERE agency IS NOT NULL GROUP BY agency ORDER BY count DESC`
   );
 
-  // ROUND with two args requires NUMERIC in PostgreSQL — cast explicitly
   const bureauWhere = agency ? 'WHERE agency = :agency AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
   const by_bureau = await query(`
     SELECT bureau,
       COUNT(*) as count,
-      ROUND(AVG(uswds_count)::NUMERIC, 1) as uswds_avg,
-      ROUND((100.0 * SUM(CASE WHEN dap = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0))::NUMERIC, 1) as dap_pct
+      ROUND(AVG(uswds_count), 1) as uswds_avg,
+      ROUND((100.0 * SUM(CASE WHEN dap = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)), 1) as dap_pct
     FROM sites ${bureauWhere}
     GROUP BY bureau ORDER BY count DESC LIMIT 30
   `, agency ? { agency } : {});
 
-  // Top third-party domains — json_each (SQLite) → jsonb_array_elements_text (PostgreSQL)
-  const tpConditions = [...conditions.map(c => `s.${c}`), 's.third_party_service_domains IS NOT NULL'];
+  // Top third-party domains — uses JSON_TABLE (MariaDB 10.6+ / MySQL 8.0+)
+  // JSON_VALID guard prevents errors on non-array or malformed stored values.
+  const tpBaseConditions = conditions.length
+    ? conditions.map(c => `s.${c}`).join(' AND ') + ' AND '
+    : '';
   const top_third_party = await query(`
-    SELECT elem AS domain, COUNT(DISTINCT s.domain) AS site_count
-    FROM sites s, jsonb_array_elements_text(s.third_party_service_domains::jsonb) AS elem
-    WHERE ${tpConditions.join(' AND ')}
-    GROUP BY elem ORDER BY site_count DESC LIMIT 15
+    SELECT jt.elem AS domain, COUNT(DISTINCT s.domain) AS site_count
+    FROM sites s, JSON_TABLE(
+      s.third_party_service_domains,
+      '$[*]' COLUMNS (elem VARCHAR(500) PATH '$')
+    ) AS jt
+    WHERE ${tpBaseConditions}s.third_party_service_domains IS NOT NULL
+      AND JSON_VALID(s.third_party_service_domains)
+    GROUP BY jt.elem ORDER BY site_count DESC LIMIT 15
   `, params);
 
   const bureauSiteWhere = agency ? 'WHERE agency = :agency AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
@@ -90,6 +110,12 @@ router.get('/', async (req: Request, res: Response) => {
  * Body: { provider: 'claude'|'glean', agency?: string, bureau?: string }
  */
 router.post('/summarize', async (req: Request, res: Response) => {
+  const ip = String(req.ip ?? req.socket.remoteAddress ?? 'unknown');
+  if (!checkSummarizeRateLimit(ip)) {
+    res.status(429).json({ error: 'Too many summary requests. Please wait a few minutes before trying again.' });
+    return;
+  }
+
   const { provider = 'claude', agency = '', bureau = '' } = req.body as {
     provider?: 'claude' | 'glean';
     agency?: string;
@@ -128,12 +154,18 @@ router.post('/summarize', async (req: Request, res: Response) => {
   `, agency ? { agency } : {});
   const topBureaus = topBureauRows.map((b: any) => `${b.bureau} (${b.count})`).join(', ');
 
-  const tpConditions = [...conditions.map(c => `s.${c}`), 's.third_party_service_domains IS NOT NULL'];
+  const tpSumBaseConditions = conditions.length
+    ? conditions.map(c => `s.${c}`).join(' AND ') + ' AND '
+    : '';
   const topTpRows = await query<any>(`
-    SELECT elem AS domain, COUNT(DISTINCT s.domain) AS site_count
-    FROM sites s, jsonb_array_elements_text(s.third_party_service_domains::jsonb) AS elem
-    WHERE ${tpConditions.join(' AND ')}
-    GROUP BY elem ORDER BY site_count DESC LIMIT 8
+    SELECT jt.elem AS domain, COUNT(DISTINCT s.domain) AS site_count
+    FROM sites s, JSON_TABLE(
+      s.third_party_service_domains,
+      '$[*]' COLUMNS (elem VARCHAR(500) PATH '$')
+    ) AS jt
+    WHERE ${tpSumBaseConditions}s.third_party_service_domains IS NOT NULL
+      AND JSON_VALID(s.third_party_service_domains)
+    GROUP BY jt.elem ORDER BY site_count DESC LIMIT 8
   `, params);
   const topTp = topTpRows.map((d: any) => d.domain).join(', ');
 
@@ -181,7 +213,8 @@ router.post('/summarize', async (req: Request, res: Response) => {
 
     res.json({ summary, scope, total_sites: total });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[stats] summarize error:', err.message);
+    res.status(500).json({ error: 'Summary generation failed' });
   }
 });
 

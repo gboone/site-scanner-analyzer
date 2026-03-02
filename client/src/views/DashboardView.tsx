@@ -71,7 +71,7 @@ export default function DashboardView() {
     }
   };
 
-  if (isLoading) return <div className="flex items-center justify-center h-full text-gray-400">Loading…</div>;
+  if (isLoading) return <div className="flex items-center justify-center h-full text-gray-400" role="status" aria-live="polite">Loading…</div>;
   if (!stats) return <div className="p-8 text-gray-400">No data yet. Import data first or use Settings → Import from GSA.</div>;
 
   const s = stats as any;
@@ -130,6 +130,7 @@ export default function DashboardView() {
                 <button
                   key={a.agency}
                   onClick={() => { setAgency(a.agency); setActiveFilter({ agency: a.agency }); setAiSummary(null); }}
+                  aria-label={`Filter by ${a.agency}`}
                   className="text-xs bg-gray-100 hover:bg-gov-blue hover:text-white rounded-full px-2.5 py-1 transition-colors"
                 >
                   {a.agency}
@@ -162,7 +163,9 @@ export default function DashboardView() {
         <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
           <div className="flex items-center gap-3 mb-2">
             <h2 className="text-sm font-semibold text-gray-700">AI Summary</h2>
+            <label htmlFor="ai-provider-select" className="sr-only">AI provider</label>
             <select
+              id="ai-provider-select"
               value={aiProvider}
               onChange={e => setAiProvider(e.target.value as AiProvider)}
               className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-gov-blue"
@@ -203,8 +206,9 @@ export default function DashboardView() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
           {/* USWDS avg by bureau — horizontal bar */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4" aria-label="Bar chart: Average USWDS Score by Bureau">
             <h2 className="text-sm font-semibold text-gray-700 mb-4">Avg USWDS Score by Bureau (top 12)</h2>
+            <p className="sr-only">Data: {bureauUswdsData.map(d => `${d.name}: ${d.uswds}`).join('; ')}</p>
             <ResponsiveContainer width="100%" height={290}>
               <BarChart
                 layout="vertical"
@@ -223,8 +227,9 @@ export default function DashboardView() {
           </div>
 
           {/* Sitemap health — pie */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4" aria-label="Pie chart: Sitemap Health">
             <h2 className="text-sm font-semibold text-gray-700 mb-4">Sitemap Health</h2>
+            <p className="sr-only">Data: {sitemapData.map(d => `${d.name}: ${d.value} sites`).join('; ')}</p>
             <ResponsiveContainer width="100%" height={290}>
               <PieChart>
                 <Pie
@@ -247,8 +252,9 @@ export default function DashboardView() {
           </div>
 
           {/* Top third-party domains — horizontal bar */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4" aria-label="Bar chart: Top Third-Party Domains">
             <h2 className="text-sm font-semibold text-gray-700 mb-4">Top Third-Party Domains</h2>
+            <p className="sr-only">Data: {thirdPartyData.map(d => `${d.name}: ${d.sites} sites`).join('; ')}</p>
             <ResponsiveContainer width="100%" height={310}>
               <BarChart
                 layout="vertical"
@@ -272,8 +278,9 @@ export default function DashboardView() {
           </div>
 
           {/* Sites by bureau — vertical bar */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4" aria-label="Bar chart: Sites by Bureau">
             <h2 className="text-sm font-semibold text-gray-700 mb-4">Sites by Bureau (top 10)</h2>
+            <p className="sr-only">Data: {bureauSiteData.map(d => `${d.name}: ${d.sites} sites`).join('; ')}</p>
             <ResponsiveContainer width="100%" height={310}>
               <BarChart
                 data={bureauSiteData}

@@ -18,7 +18,6 @@ if (fs.existsSync(envPath)) {
 
 export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
-  dbPath: process.env.DB_PATH || './data/scanner.db',
   gsaApiKey: process.env.GSA_API_KEY || '',
   gleanApiKey: process.env.GLEAN_API_KEY || '',
   gleanEndpoint: process.env.GLEAN_ENDPOINT || '',

@@ -27,8 +27,8 @@ ORDER BY uswds_count DESC;`,
   bureau,
   COUNT(*) as total,
   SUM(CASE WHEN uswds_count > 0 THEN 1 ELSE 0 END) as has_uswds,
-  ROUND((100.0 * SUM(CASE WHEN uswds_count > 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0))::NUMERIC, 1) as uswds_pct,
-  ROUND(AVG(uswds_count)::NUMERIC, 1) as avg_uswds_score
+  ROUND((100.0 * SUM(CASE WHEN uswds_count > 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)), 1) as uswds_pct,
+  ROUND(AVG(uswds_count), 1) as avg_uswds_score
 FROM sites
 WHERE bureau IS NOT NULL
 GROUP BY bureau
@@ -40,9 +40,13 @@ ORDER BY uswds_pct DESC;`,
     sql: `SELECT
   elem AS third_party_domain,
   COUNT(DISTINCT s.domain) AS site_count
-FROM sites s, jsonb_array_elements_text(s.third_party_service_domains::jsonb) AS elem
+FROM sites s, JSON_TABLE(
+  s.third_party_service_domains,
+  '$[*]' COLUMNS (elem VARCHAR(500) PATH '$')
+) AS jt
 WHERE s.third_party_service_domains IS NOT NULL
-GROUP BY elem
+  AND JSON_VALID(s.third_party_service_domains)
+GROUP BY jt.elem
 ORDER BY site_count DESC
 LIMIT 20;`,
   },
@@ -60,7 +64,7 @@ ORDER BY status_code, agency;`,
   COUNT(*) as total,
   SUM(https_enforced) as https_count,
   SUM(hsts) as hsts_count,
-  ROUND((100.0 * SUM(https_enforced) / NULLIF(COUNT(*), 0))::NUMERIC, 1) as https_pct
+  ROUND((100.0 * SUM(https_enforced) / NULLIF(COUNT(*), 0)), 1) as https_pct
 FROM sites
 GROUP BY agency
 ORDER BY https_pct ASC;`,
@@ -82,15 +86,19 @@ ORDER BY sitemap_xml_count DESC;`,
   {
     label: 'USWDS class list for a specific domain',
     sql: `SELECT elem AS css_class
-FROM sites, jsonb_array_elements_text(uswds_usa_class_list::jsonb) AS elem
+FROM sites, JSON_TABLE(
+  uswds_usa_class_list,
+  '$[*]' COLUMNS (elem VARCHAR(500) PATH '$')
+) AS jt
 WHERE domain = 'www.va.gov'
-ORDER BY elem;`,
+  AND JSON_VALID(uswds_usa_class_list)
+ORDER BY jt.elem;`,
   },
   {
     label: 'Recently scanned sites (last 30 days)',
     sql: `SELECT domain, agency, scan_date, status_code, live
 FROM sites
-WHERE scan_date > to_char(NOW() - INTERVAL '30 days', 'YYYY-MM-DD')
+WHERE scan_date > DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 30 DAY), '%Y-%m-%d')
 ORDER BY scan_date DESC;`,
   },
   {

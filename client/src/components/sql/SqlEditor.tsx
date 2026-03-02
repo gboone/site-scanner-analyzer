@@ -71,7 +71,7 @@ const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(
       }
     }, [value]);
 
-    return <div ref={containerRef} className="rounded-md overflow-hidden border border-gray-700" />;
+    return <div ref={containerRef} className="rounded-md overflow-hidden border border-gray-700" aria-label="SQL query editor" />;
   }
 );
 

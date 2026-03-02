@@ -15,7 +15,7 @@ agenciesRouter.get('/', async (req: Request, res: Response) => {
   const rows = q
     ? await query(`
         SELECT agency, COUNT(*) as count FROM sites
-        WHERE agency IS NOT NULL AND agency ILIKE :q
+        WHERE agency IS NOT NULL AND agency LIKE :q
         GROUP BY agency ORDER BY count DESC LIMIT 20
       `, { q: `%${q}%` })
     : await query(`
@@ -42,7 +42,7 @@ bureausRouter.get('/', async (req: Request, res: Response) => {
     rows = q
       ? await query(`
           SELECT bureau, COUNT(*) as count FROM sites
-          WHERE bureau IS NOT NULL AND agency = :agency AND bureau ILIKE :q
+          WHERE bureau IS NOT NULL AND agency = :agency AND bureau LIKE :q
           GROUP BY bureau ORDER BY count DESC LIMIT 20
         `, { agency, q: `%${q}%` })
       : await query(`
@@ -54,7 +54,7 @@ bureausRouter.get('/', async (req: Request, res: Response) => {
     rows = q
       ? await query(`
           SELECT bureau, COUNT(*) as count FROM sites
-          WHERE bureau IS NOT NULL AND bureau ILIKE :q
+          WHERE bureau IS NOT NULL AND bureau LIKE :q
           GROUP BY bureau ORDER BY count DESC LIMIT 20
         `, { q: `%${q}%` })
       : await query(`

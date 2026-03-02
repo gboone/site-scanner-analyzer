@@ -1,19 +1,36 @@
 import { Router, Request, Response } from 'express';
 import { query, execute } from '../db';
 import { config } from '../config';
+import { validateUrlForSsrf } from '../middleware/ssrf-protection';
 
 const router = Router();
+
+// Simple in-memory rate limiter: max 5 briefing generations per IP per 5 minutes
+const briefingRateLimitMap = new Map<string, number[]>();
+const BRIEFING_RATE_LIMIT = 5;
+const BRIEFING_RATE_WINDOW_MS = 5 * 60 * 1000;
+
+function checkBriefingRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const timestamps = (briefingRateLimitMap.get(ip) ?? []).filter(t => now - t < BRIEFING_RATE_WINDOW_MS);
+  if (timestamps.length >= BRIEFING_RATE_LIMIT) return false;
+  timestamps.push(now);
+  briefingRateLimitMap.set(ip, timestamps);
+  return true;
+}
 
 // GET /api/v1/briefings/export/:id — registered BEFORE /:domain to prevent "export" matching as a domain name
 router.get('/export/:id', async (req: Request, res: Response) => {
   const id = parseInt(String(req.params.id));
-  const briefing = (await query<any>('SELECT * FROM briefings WHERE id = $1', [id]))[0];
+  const briefing = (await query<any>('SELECT * FROM briefings WHERE id = ?', [id]))[0];
   if (!briefing) {
     res.status(404).json({ error: 'Briefing not found' });
     return;
   }
+  const safeDomain = String(briefing.domain).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeDate = String(briefing.created_at).slice(0, 10).replace(/[^0-9-]/g, '');
   res.setHeader('Content-Type', 'text/markdown');
-  res.setHeader('Content-Disposition', `attachment; filename="briefing-${briefing.domain}-${briefing.created_at.slice(0,10)}.md"`);
+  res.setHeader('Content-Disposition', `attachment; filename="briefing-${safeDomain}-${safeDate}.md"`);
   res.send(briefing.full_markdown || '# No content');
 });
 
@@ -21,7 +38,7 @@ router.get('/export/:id', async (req: Request, res: Response) => {
 router.get('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
   const briefings = await query(
-    'SELECT * FROM briefings WHERE domain = $1 ORDER BY created_at DESC',
+    'SELECT * FROM briefings WHERE domain = ? ORDER BY created_at DESC',
     [domain]
   );
   res.json(briefings);
@@ -29,6 +46,12 @@ router.get('/:domain', async (req: Request, res: Response) => {
 
 // POST /api/v1/briefings - generate a new briefing
 router.post('/', async (req: Request, res: Response) => {
+  const ip = String(req.ip ?? req.socket.remoteAddress ?? 'unknown');
+  if (!checkBriefingRateLimit(ip)) {
+    res.status(429).json({ error: 'Too many briefing requests. Please wait a few minutes before trying again.' });
+    return;
+  }
+
   const { domain, provider = 'glean', scope } = req.body as {
     domain: string;
     provider?: 'glean' | 'claude';
@@ -40,7 +63,7 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  const site = (await query<any>('SELECT * FROM sites WHERE domain = $1', [domain]))[0];
+  const site = (await query<any>('SELECT * FROM sites WHERE domain = ?', [domain]))[0];
   if (!site) {
     res.status(404).json({ error: 'Site not found' });
     return;
@@ -84,7 +107,6 @@ router.post('/', async (req: Request, res: Response) => {
       VALUES (:domain, :created_at, :provider, :model, :agency_identity, :website_purpose,
         :policy_objectives, :recent_milestones, :website_role, :references_json, :full_markdown,
         :prompt_tokens, :completion_tokens, :duration_ms)
-      RETURNING id
     `, {
       domain,
       created_at:        now,
@@ -102,18 +124,24 @@ router.post('/', async (req: Request, res: Response) => {
       duration_ms,
     });
 
-    const insertId = Number(insertResult.rows[0].id);
-    const briefing = (await query('SELECT * FROM briefings WHERE id = $1', [insertId]))[0];
+    const insertId = insertResult.insertId;
+    const briefing = (await query('SELECT * FROM briefings WHERE id = ?', [insertId]))[0];
     res.json(briefing);
 
   } catch (err: any) {
-    res.status(500).json({ error: `Briefing generation failed: ${err.message}` });
+    console.error('[briefings] generation error:', err.message);
+    res.status(500).json({ error: 'Briefing generation failed' });
   }
 });
 
 async function verifyReferences(refs: Array<{title: string; url: string; description?: string}>) {
   const { default: fetch } = await import('node-fetch');
   return Promise.all(refs.map(async (ref) => {
+    // SSRF protection: validate AI-generated URLs before fetching
+    const ssrfError = await validateUrlForSsrf(ref.url);
+    if (ssrfError) {
+      return { ...ref, verified: false, status: null };
+    }
     try {
       const resp = await fetch(ref.url, {
         method: 'HEAD',

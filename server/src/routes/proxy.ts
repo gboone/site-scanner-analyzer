@@ -61,7 +61,8 @@ router.post('/', ssrfProtection, async (req: Request, res: Response) => {
     if (err.name === 'TimeoutError' || err.code === 'UND_ERR_CONNECT_TIMEOUT') {
       res.status(504).json({ success: false, error: 'Request timed out' });
     } else {
-      res.status(502).json({ success: false, error: err.message });
+      console.error('[proxy] fetch error:', err.message);
+      res.status(502).json({ success: false, error: 'Proxy request failed' });
     }
   }
 });

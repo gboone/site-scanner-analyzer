@@ -36,7 +36,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
-          <div className="text-4xl">⚠️</div>
+          <div className="text-4xl" aria-hidden="true">⚠️</div>
           <div className="text-sm font-semibold text-gray-700">
             {this.props.label ? `${this.props.label} crashed` : 'Something went wrong'}
           </div>

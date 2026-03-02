@@ -81,7 +81,7 @@ function ScanSummary({ result }: { result: any }) {
 
   return (
     <div className="mt-2 bg-green-50 rounded p-2 space-y-1">
-      <div className="text-green-700 font-medium">✓ Scan complete — database updated</div>
+      <div className="text-green-700 font-medium"><span aria-hidden="true">✓ </span>Scan complete — database updated</div>
       {visible.map(r => (
         <div key={r.label} className="flex gap-2">
           <span className="text-gray-500 w-24 shrink-0">{r.label}:</span>
@@ -139,11 +139,15 @@ export default function ScanProgress({ progress }: { progress: ProgressState }) 
         const active = progress.step === s.key;
         return (
           <div key={s.key} className="flex items-center gap-2">
-            <span className={`w-4 text-center ${done ? 'text-green-500' : active ? 'text-gov-blue animate-pulse' : 'text-gray-300'}`}>
+            <span
+              className={`w-4 text-center ${done ? 'text-green-500' : active ? 'text-gov-blue animate-pulse' : 'text-gray-300'}`}
+              aria-hidden="true"
+            >
               {done ? '✓' : active ? '◌' : '○'}
             </span>
             <span className={done ? 'text-gray-700' : active ? 'text-gov-blue font-medium' : 'text-gray-400'}>
               {s.label}
+              <span className="sr-only">{done ? ' — complete' : active ? ' — in progress' : ' — pending'}</span>
             </span>
           </div>
         );

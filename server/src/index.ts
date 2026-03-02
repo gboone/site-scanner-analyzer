@@ -77,6 +77,15 @@ async function main() {
   // ---------------------------------------------------------------------------
   // 3. Shared middleware
   // ---------------------------------------------------------------------------
+  // Security headers
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+
   // CORS: env var in production (VIP), localhost fallback for dev
   const corsOrigin = process.env.ALLOWED_ORIGIN
     ? process.env.ALLOWED_ORIGIN
@@ -119,9 +128,9 @@ async function main() {
     await execute(
       `INSERT INTO settings (key, value)
        VALUES (:key, :value)
-       ON CONFLICT (key) DO UPDATE SET
-         value      = EXCLUDED.value,
-         updated_at = to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+       ON DUPLICATE KEY UPDATE
+         value      = VALUES(value),
+         updated_at = DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ')`,
       { key, value }
     );
     // Also update process.env so the running config picks it up immediately
