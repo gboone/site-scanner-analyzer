@@ -77,6 +77,15 @@ async function main() {
   // ---------------------------------------------------------------------------
   // 3. Shared middleware
   // ---------------------------------------------------------------------------
+  // Security headers
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+
   // CORS: env var in production (VIP), localhost fallback for dev
   const corsOrigin = process.env.ALLOWED_ORIGIN
     ? process.env.ALLOWED_ORIGIN

@@ -346,19 +346,19 @@ export default function ExplorerView() {
         {selectedDomains.size > 0 && (
           <div className="flex items-center gap-3 px-3 py-1.5 bg-blue-50 border-b border-blue-200 text-xs flex-wrap">
             <span className="text-blue-700 font-medium">
-              ✓ {selectedDomains.size.toLocaleString()} selected
+              <span aria-hidden="true">✓ </span>{selectedDomains.size.toLocaleString()} selected
               {selectedOnPage < selectedDomains.size && ` (${selectedOnPage} on this page)`}
             </span>
             <button onClick={exportSelected} disabled={bulkScan.running} className="btn-primary text-xs py-0.5 px-2">
-              Export JSON ↓
+              Export JSON <span aria-hidden="true">↓</span>
             </button>
             {!bulkScan.running ? (
               <button onClick={rescanSelected} className="btn-secondary text-xs py-0.5 px-2">
-                🔄 Rescan selected
+                <span aria-hidden="true">🔄 </span>Rescan selected
               </button>
             ) : (
               <button onClick={stopBulkRescan} className="btn-secondary text-xs py-0.5 px-2 text-red-600 border-red-300">
-                ⏹ Stop
+                <span aria-hidden="true">⏹ </span>Stop
               </button>
             )}
             <button onClick={clearSelection} disabled={bulkScan.running} className="btn-secondary text-xs py-0.5 px-2">
@@ -377,7 +377,7 @@ export default function ExplorerView() {
             )}
             {/* Bulk rescan progress */}
             {bulkScan.running && (
-              <span className="text-blue-700 ml-1">
+              <span className="text-blue-700 ml-1" role="status" aria-live="polite" aria-atomic="true">
                 Scanning {bulkScan.current.length} at a time —{' '}
                 {bulkScan.done + bulkScan.failed} of {bulkScan.total} done
                 {bulkScan.failed > 0 && (
@@ -386,8 +386,8 @@ export default function ExplorerView() {
               </span>
             )}
             {!bulkScan.running && bulkScan.total > 0 && (
-              <span className="text-green-700 ml-1">
-                ✓ Rescan complete — {bulkScan.done} updated
+              <span className="text-green-700 ml-1" role="status" aria-live="polite">
+                <span aria-hidden="true">✓ </span>Rescan complete — {bulkScan.done} updated
                 {bulkScan.failed > 0 && (
                   <span className="text-red-500 ml-1">, {bulkScan.failed} failed</span>
                 )}

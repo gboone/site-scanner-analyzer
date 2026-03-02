@@ -94,8 +94,9 @@ export default function SiteDetail() {
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-gov-blue hover:underline"
+              aria-label={`Open ${selectedDomain} website in new tab`}
             >
-              Open ↗
+              Open <span aria-hidden="true">↗</span>
             </a>
           )}
           <button

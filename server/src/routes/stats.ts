@@ -4,6 +4,20 @@ import { config } from '../config';
 
 const router = Router();
 
+// Simple in-memory rate limiter: max 10 AI summarizations per IP per 5 minutes
+const summarizeRateLimitMap = new Map<string, number[]>();
+const SUMMARIZE_RATE_LIMIT = 10;
+const SUMMARIZE_RATE_WINDOW_MS = 5 * 60 * 1000;
+
+function checkSummarizeRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const timestamps = (summarizeRateLimitMap.get(ip) ?? []).filter(t => now - t < SUMMARIZE_RATE_WINDOW_MS);
+  if (timestamps.length >= SUMMARIZE_RATE_LIMIT) return false;
+  timestamps.push(now);
+  summarizeRateLimitMap.set(ip, timestamps);
+  return true;
+}
+
 router.get('/', async (req: Request, res: Response) => {
   const agency = (req.query.agency as string) || '';
   const bureau = (req.query.bureau as string) || '';
@@ -96,6 +110,12 @@ router.get('/', async (req: Request, res: Response) => {
  * Body: { provider: 'claude'|'glean', agency?: string, bureau?: string }
  */
 router.post('/summarize', async (req: Request, res: Response) => {
+  const ip = String(req.ip ?? req.socket.remoteAddress ?? 'unknown');
+  if (!checkSummarizeRateLimit(ip)) {
+    res.status(429).json({ error: 'Too many summary requests. Please wait a few minutes before trying again.' });
+    return;
+  }
+
   const { provider = 'claude', agency = '', bureau = '' } = req.body as {
     provider?: 'claude' | 'glean';
     agency?: string;
@@ -193,7 +213,8 @@ router.post('/summarize', async (req: Request, res: Response) => {
 
     res.json({ summary, scope, total_sites: total });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[stats] summarize error:', err.message);
+    res.status(500).json({ error: 'Summary generation failed' });
   }
 });
 

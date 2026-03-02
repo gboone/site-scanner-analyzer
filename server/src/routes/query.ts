@@ -35,7 +35,8 @@ router.post('/', async (req: Request, res: Response) => {
     res.json({ rows, count: (rows as any[]).length, duration_ms });
   } catch (err: any) {
     await client.query('ROLLBACK').catch(() => {});
-    res.status(400).json({ error: err.message });
+    console.error('[query] SQL error:', err.message);
+    res.status(400).json({ error: 'Query failed. Check your SQL syntax and try again.' });
   } finally {
     client.release();
   }

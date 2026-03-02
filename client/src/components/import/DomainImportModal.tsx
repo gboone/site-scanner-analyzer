@@ -332,7 +332,7 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
                 onClick={handleStop}
                 className="btn-secondary text-xs text-red-600 border-red-300"
               >
-                ⏹ Stop
+                <span aria-hidden="true">⏹ </span>Stop
               </button>
             ) : (
               <>

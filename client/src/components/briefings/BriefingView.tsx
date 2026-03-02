@@ -81,6 +81,8 @@ export default function BriefingView({ briefing }: BriefingViewProps) {
       <div
         ref={contentRef}
         className="prose prose-sm max-w-none text-gray-800 text-xs leading-relaxed"
+        role="article"
+        aria-label="Briefing content"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>
