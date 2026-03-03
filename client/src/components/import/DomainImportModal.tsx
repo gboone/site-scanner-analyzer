@@ -1,8 +1,7 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useDropzone } from 'react-dropzone';
-import { useQueryClient } from '@tanstack/react-query';
-import { api } from '../../lib/api';
+import { useScanQueue } from '../../contexts/ScanQueueContext';
 
 // ---------------------------------------------------------------------------
 // Domain parsing
@@ -24,48 +23,8 @@ function parseDomains(raw: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Concurrency helper (same pattern as ExplorerView bulk scan)
-// ---------------------------------------------------------------------------
-
-async function pLimit<T>(
-  items: T[],
-  concurrency: number,
-  task: (item: T) => Promise<void>,
-  shouldAbort: () => boolean,
-): Promise<void> {
-  const queue = [...items];
-  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
-    while (queue.length > 0 && !shouldAbort()) {
-      const item = queue.shift()!;
-      await task(item);
-    }
-  });
-  await Promise.allSettled(workers);
-}
-
-const CONCURRENCY = 3;
-
-// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface ScanProgress {
-  running: boolean;
-  total: number;
-  done: number;
-  failed: number;
-  current: string[];
-  errors: { domain: string; message: string }[];
-}
-
-const INITIAL_PROGRESS: ScanProgress = {
-  running: false,
-  total: 0,
-  done: 0,
-  failed: 0,
-  current: [],
-  errors: [],
-};
 
 interface Props {
   open: boolean;
@@ -77,21 +36,25 @@ interface Props {
 // ---------------------------------------------------------------------------
 
 export function DomainImportModal({ open, onOpenChange }: Props) {
-  const qc = useQueryClient();
+  const { scan, startScan, stopScan } = useScanQueue();
   const [raw, setRaw] = React.useState('');
-  const [progress, setProgress] = React.useState<ScanProgress>(INITIAL_PROGRESS);
-  const abortedRef = React.useRef(false);
+  // Track whether this modal instance initiated the current (or last) scan,
+  // so we show the progress block only for scans started here.
+  const scanInitiatedRef = React.useRef(false);
 
-  // Reset state each time the modal opens
+  // Reset raw text when modal opens. Only reset the "I started this scan" flag
+  // if no scan is currently running (so re-opening mid-scan still shows progress).
   React.useEffect(() => {
     if (open) {
       setRaw('');
-      setProgress(INITIAL_PROGRESS);
+      if (!scan.running) {
+        scanInitiatedRef.current = false;
+      }
     }
-  }, [open]);
+  }, [open, scan.running]);
 
   const domains = parseDomains(raw);
-  const isDone = !progress.running && progress.total > 0;
+  const isDone = scanInitiatedRef.current && !scan.running && scan.total > 0;
 
   // Accept .txt (and .csv) drops onto the textarea area
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -106,92 +69,34 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
   });
 
   // ---------------------------------------------------------------------------
-  // Scan logic
+  // Scan logic — delegates to ScanQueueContext so scan persists across navigation
   // ---------------------------------------------------------------------------
 
-  const handleStart = async () => {
-    if (progress.running || domains.length === 0) return;
-    abortedRef.current = false;
-    setProgress({ ...INITIAL_PROGRESS, running: true, total: domains.length });
-
-    const { scanSite } = await import('../../scanner/orchestrator');
-    const { computeDiff } = await import('../../lib/diff');
-
-    await pLimit(
-      domains,
-      CONCURRENCY,
-      async (domain) => {
-        if (abortedRef.current) return;
-        setProgress((p) => ({ ...p, current: [...p.current, domain] }));
-
-        try {
-          const result = await scanSite(`https://${domain}`);
-          if (abortedRef.current) return;
-
-          // Build a minimal scan fields snapshot for the diff
-          // (no prior site record exists, so "before" is empty)
-          const scanFields: Record<string, unknown> = {};
-          if (result.tech_stack) {
-            const ts = result.tech_stack;
-            Object.assign(scanFields, {
-              cms: ts.cms,
-              web_server: ts.web_server,
-              cdn_provider: ts.cdn,
-              hosting_provider: ts.hosting_provider,
-              https_enforced: ts.https_enforced,
-              hsts: ts.hsts,
-            });
-            if (ts.dap) Object.assign(scanFields, { dap: ts.dap.detected, ga_tag_id: ts.dap.ga_tag_id });
-          }
-          if (result.sitemap) Object.assign(scanFields, { sitemap_xml_detected: result.sitemap.detected });
-          if (result.robots)  Object.assign(scanFields, { robots_txt_detected: result.robots.detected });
-          if (result.dns)     Object.assign(scanFields, { ipv6: result.dns.ipv6 });
-
-          const diff = computeDiff({}, scanFields);
-          await api.postScan(domain, result, diff);
-
-          setProgress((p) => ({
-            ...p,
-            done: p.done + 1,
-            current: p.current.filter((d) => d !== domain),
-          }));
-        } catch (e: any) {
-          setProgress((p) => ({
-            ...p,
-            failed: p.failed + 1,
-            current: p.current.filter((d) => d !== domain),
-            errors: [...p.errors, { domain, message: e.message }],
-          }));
-        }
-      },
-      () => abortedRef.current,
-    );
-
-    setProgress((p) => ({ ...p, running: false, current: [] }));
-    qc.invalidateQueries({ queryKey: ['sites'] });
-    qc.invalidateQueries({ queryKey: ['stats'] });
+  const handleStart = () => {
+    if (scan.running || domains.length === 0) return;
+    scanInitiatedRef.current = true;
+    // No siteMap for new domains — context will default to https://{domain}
+    // and diff against an empty baseline.
+    startScan({ domains, label: 'Scan & import' });
   };
 
-  const handleStop = () => {
-    abortedRef.current = true;
-  };
+  const handleStop = () => stopScan();
 
-  const handleClose = () => {
-    if (progress.running) return; // block close while scanning
-    onOpenChange(false);
-  };
+  // Allow closing the modal while scanning — scan continues in the Shell indicator.
+  const handleClose = () => onOpenChange(false);
 
   const handleClear = () => {
     setRaw('');
-    setProgress(INITIAL_PROGRESS);
+    scanInitiatedRef.current = false;
   };
 
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
-  const completedCount = progress.done + progress.failed;
-  const pct = progress.total ? (completedCount / progress.total) * 100 : 0;
+  const showProgress = (scan.running && scanInitiatedRef.current) || isDone;
+  const completedCount = scan.done + scan.failed;
+  const pct = scan.total ? (completedCount / scan.total) * 100 : 0;
 
   return (
     <Dialog.Root open={open} onOpenChange={handleClose}>
@@ -209,8 +114,7 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
             <Dialog.Close asChild>
               <button
                 aria-label="Close dialog"
-                className="text-gray-400 hover:text-gray-600 text-xl leading-none disabled:opacity-40"
-                disabled={progress.running}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none"
               >
                 <span aria-hidden="true">×</span>
               </button>
@@ -240,7 +144,7 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
                   id="domain-import-textarea"
                   value={raw}
                   onChange={(e) => setRaw(e.target.value)}
-                  disabled={progress.running}
+                  disabled={scan.running}
                   rows={8}
                   aria-describedby="domain-import-description"
                   placeholder={'ct.gov\nkansas.gov\nhhs.gov, va.gov'}
@@ -261,7 +165,7 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
                     ? `${domains.length} domain${domains.length === 1 ? '' : 's'} ready`
                     : 'Or drag and drop a .txt file'}
                 </p>
-                {raw && !progress.running && (
+                {raw && !scan.running && (
                   <button
                     onClick={handleClear}
                     className="text-xs text-gray-400 hover:text-gray-600"
@@ -273,16 +177,16 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
             </div>
 
             {/* Scan progress */}
-            {(progress.running || isDone) && (
+            {showProgress && (
               <div role="status" aria-live="polite" aria-atomic="false" className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-gray-700">
-                    {progress.running ? 'Scanning…' : '✓ Complete'}
+                    {scan.running ? 'Scanning…' : '✓ Complete'}
                   </span>
                   <span className="text-xs text-gray-500">
-                    {completedCount} / {progress.total}
-                    {progress.failed > 0 && (
-                      <span className="text-red-500 ml-1">({progress.failed} failed)</span>
+                    {completedCount} / {scan.total}
+                    {scan.failed > 0 && (
+                      <span className="text-red-500 ml-1">({scan.failed} failed)</span>
                     )}
                   </span>
                 </div>
@@ -291,30 +195,37 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
                 <div
                   role="progressbar"
                   aria-valuemin={0}
-                  aria-valuemax={progress.total}
+                  aria-valuemax={scan.total}
                   aria-valuenow={completedCount}
-                  aria-label={`Scan progress: ${completedCount} of ${progress.total}`}
+                  aria-label={`Scan progress: ${completedCount} of ${scan.total}`}
                   className="h-1.5 bg-gray-200 rounded-full overflow-hidden"
                 >
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${
-                      isDone && progress.failed > 0 ? 'bg-yellow-400' : 'bg-gov-blue'
+                      isDone && scan.failed > 0 ? 'bg-yellow-400' : 'bg-gov-blue'
                     }`}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
 
                 {/* Currently scanning */}
-                {progress.current.length > 0 && (
+                {scan.current.length > 0 && (
                   <p className="text-xs text-gray-400 font-mono truncate">
-                    {progress.current.join(', ')}
+                    {scan.current.join(', ')}
+                  </p>
+                )}
+
+                {/* "scan continues in background" hint */}
+                {scan.running && (
+                  <p className="text-xs text-blue-600">
+                    You can close this dialog — the scan will continue in the background.
                   </p>
                 )}
 
                 {/* Error list */}
-                {progress.errors.length > 0 && (
+                {scan.errors.length > 0 && (
                   <ul className="text-xs text-red-600 space-y-0.5 max-h-24 overflow-y-auto bg-red-50 rounded p-2 font-mono">
-                    {progress.errors.map((e, i) => (
+                    {scan.errors.map((e, i) => (
                       <li key={i}>
                         {e.domain}: {e.message}
                       </li>
@@ -327,13 +238,20 @@ export function DomainImportModal({ open, onOpenChange }: Props) {
 
           {/* Footer */}
           <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-200">
-            {progress.running ? (
-              <button
-                onClick={handleStop}
-                className="btn-secondary text-xs text-red-600 border-red-300"
-              >
-                <span aria-hidden="true">⏹ </span>Stop
-              </button>
+            {scan.running ? (
+              <>
+                <Dialog.Close asChild>
+                  <button className="btn-secondary text-xs">
+                    Close (scan continues)
+                  </button>
+                </Dialog.Close>
+                <button
+                  onClick={handleStop}
+                  className="btn-secondary text-xs text-red-600 border-red-300"
+                >
+                  <span aria-hidden="true">⏹ </span>Stop scan
+                </button>
+              </>
             ) : (
               <>
                 <Dialog.Close asChild>

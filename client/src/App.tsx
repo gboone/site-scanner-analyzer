@@ -6,6 +6,7 @@ import DashboardView from './views/DashboardView';
 import SettingsView from './views/SettingsView';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useUIStore } from './store/uiStore';
+import { ScanQueueProvider } from './contexts/ScanQueueContext';
 
 export type View = 'explorer' | 'sql' | 'dashboard' | 'settings';
 
@@ -45,13 +46,15 @@ export default function App() {
   }, [closeDetail]);
 
   return (
-    <Shell currentView={currentView} onNavigate={setCurrentView}>
-      <ErrorBoundary key={currentView} label={currentView}>
-        {currentView === 'explorer' && <ExplorerView />}
-        {currentView === 'sql' && <SqlView />}
-        {currentView === 'dashboard' && <DashboardView />}
-        {currentView === 'settings' && <SettingsView />}
-      </ErrorBoundary>
-    </Shell>
+    <ScanQueueProvider>
+      <Shell currentView={currentView} onNavigate={setCurrentView}>
+        <ErrorBoundary key={currentView} label={currentView}>
+          {currentView === 'explorer' && <ExplorerView />}
+          {currentView === 'sql' && <SqlView />}
+          {currentView === 'dashboard' && <DashboardView />}
+          {currentView === 'settings' && <SettingsView />}
+        </ErrorBoundary>
+      </Shell>
+    </ScanQueueProvider>
   );
 }

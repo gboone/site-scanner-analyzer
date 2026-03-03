@@ -41,16 +41,20 @@ export function toPositional(
 // ---------------------------------------------------------------------------
 // SELECT helper → T[]
 // ---------------------------------------------------------------------------
+// Uses pool.query() (text protocol / client-side escaping) rather than
+// pool.execute() (binary prepared-statement protocol) for broad compatibility
+// with MySQL proxies such as VIP's ProxySQL, which may not support the binary
+// prepared-statement wire format or parameterised LIMIT/OFFSET.
 export async function query<T = Record<string, unknown>>(
   sql: string,
   args?: Record<string, unknown> | any[]
 ): Promise<T[]> {
   if (args && !Array.isArray(args)) {
     const [s, a] = toPositional(sql, args);
-    const [rows] = await pool.execute(s, a);
+    const [rows] = await pool.query(s, a);
     return rows as T[];
   }
-  const [rows] = await pool.execute(sql, (args as any[]) ?? []);
+  const [rows] = await pool.query(sql, (args as any[]) ?? []);
   return rows as T[];
 }
 
@@ -63,10 +67,10 @@ export async function execute(
 ): Promise<{ rows: Record<string, unknown>[]; rowCount: number; insertId: number }> {
   if (args && !Array.isArray(args)) {
     const [s, a] = toPositional(sql, args);
-    const [result] = await pool.execute(s, a) as any;
+    const [result] = await pool.query(s, a) as any;
     return { rows: [], rowCount: result.affectedRows ?? 0, insertId: result.insertId ?? 0 };
   }
-  const [result] = await pool.execute(sql, (args as any[]) ?? []) as any;
+  const [result] = await pool.query(sql, (args as any[]) ?? []) as any;
   return { rows: [], rowCount: result.affectedRows ?? 0, insertId: result.insertId ?? 0 };
 }
 
@@ -270,6 +274,20 @@ export async function initDb(): Promise<void> {
     )
   `);
   await createIndex('idx_briefings_domain', 'briefings', 'domain');
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS scan_sessions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      status TEXT NOT NULL DEFAULT 'running',
+      total_domains INTEGER NOT NULL DEFAULT 0,
+      completed_count INTEGER NOT NULL DEFAULT 0,
+      failed_count INTEGER NOT NULL DEFAULT 0,
+      label TEXT
+    )
+  `);
+  await createIndex('idx_scan_sessions_started_at', 'scan_sessions', 'started_at', 191);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (

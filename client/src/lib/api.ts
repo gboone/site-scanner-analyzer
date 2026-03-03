@@ -97,4 +97,21 @@ export const api = {
   setSetting: (key: string, value: string) =>
     request(`/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
   health: () => request('/health'),
+
+  // Scan sessions — persists bulk-scan progress across page loads
+  getScanSessions: () => request<Record<string, unknown>[]>('/scan-sessions'),
+  createScanSession: (total_domains: number, label?: string) =>
+    request<{ id: number }>('/scan-sessions', {
+      method: 'POST',
+      body: JSON.stringify({ total_domains, label }),
+    }),
+  updateScanSession: (id: number, data: {
+    status?: string;
+    completed_count?: number;
+    failed_count?: number;
+  }) =>
+    request(`/scan-sessions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 };

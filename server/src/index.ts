@@ -13,6 +13,7 @@ import scansRouter from './routes/scans';
 import proxyRouter from './routes/proxy';
 import gsaRouter from './routes/gsa';
 import briefingsRouter from './routes/briefings';
+import scanSessionsRouter from './routes/scan-sessions';
 import { agenciesRouter, bureausRouter } from './routes/agencies';
 import { validateUrlForSsrf } from './middleware/ssrf-protection';
 
@@ -116,9 +117,10 @@ async function main() {
   app.use('/api/v1/scans',     scansRouter);
   app.use('/api/v1/proxy',     proxyRouter);
   app.use('/api/v1/gsa',       gsaRouter);
-  app.use('/api/v1/briefings', briefingsRouter);
-  app.use('/api/v1/agencies',  agenciesRouter);
-  app.use('/api/v1/bureaus',   bureausRouter);
+  app.use('/api/v1/briefings',      briefingsRouter);
+  app.use('/api/v1/scan-sessions',  scanSessionsRouter);
+  app.use('/api/v1/agencies',       agenciesRouter);
+  app.use('/api/v1/bureaus',        bureausRouter);
 
   // Settings endpoint (simple key/value store)
   app.get('/api/v1/settings', async (_req, res) => {

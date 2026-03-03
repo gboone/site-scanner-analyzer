@@ -1,14 +1,14 @@
 import React from 'react';
 import { type ColumnDef } from '@tanstack/react-table';
-import { useQueryClient } from '@tanstack/react-query';
 import { DataTable, type Table } from '../components/data-table/DataTable';
 import FilterChips from '../components/data-table/FilterChips';
 import ColumnToggle from '../components/data-table/ColumnToggle';
 import Pagination from '../components/data-table/Pagination';
 import SiteDetail from '../components/site-detail/SiteDetail';
 import { DomainImportModal } from '../components/import/DomainImportModal';
-import { useSites } from '../hooks/useSites';
+import { useSites, useScanSessions } from '../hooks/useSites';
 import { useUIStore } from '../store/uiStore';
+import { useScanQueue } from '../contexts/ScanQueueContext';
 import { api } from '../lib/api';
 
 const STATUS_COLORS: Record<number, string> = {
@@ -109,35 +109,22 @@ const COLUMNS: ColumnDef<Record<string, unknown>, any>[] = [
   },
 ];
 
-/** Run up to `concurrency` async tasks at a time from `items`, calling `task` for each. */
-async function pLimit<T>(
-  items: T[],
-  concurrency: number,
-  task: (item: T) => Promise<void>,
-  shouldAbort: () => boolean,
-): Promise<void> {
-  const queue = [...items];
-  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
-    while (queue.length > 0 && !shouldAbort()) {
-      const item = queue.shift()!;
-      await task(item);
-    }
-  });
-  await Promise.allSettled(workers);
-}
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-interface BulkScanState {
-  running: boolean;
-  total: number;
-  done: number;
-  failed: number;
-  current: string[]; // domains actively scanning right now
+function formatRelativeTime(isoString: string): string {
+  const diff = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
-
-const BULK_CONCURRENCY = 3; // scans in parallel at a time
 
 export default function ExplorerView() {
-  const qc = useQueryClient();
+  const { scan, startScan, stopScan } = useScanQueue();
   const { openDetail, selectedDomain, detailPanelOpen } = useUIStore();
   const [page, setPage] = React.useState(1);
   const [sort, setSort] = React.useState('domain');
@@ -145,16 +132,13 @@ export default function ExplorerView() {
   const [filters, setFilters] = React.useState<Record<string, string>>({});
   const [tableInstance, setTableInstance] = React.useState<Table<any> | null>(null);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
 
   // Bulk selection state
   const [selectedDomains, setSelectedDomains] = React.useState<Set<string>>(new Set());
   const [selectAllLoading, setSelectAllLoading] = React.useState(false);
 
-  // Bulk rescan state
-  const [bulkScan, setBulkScan] = React.useState<BulkScanState>({
-    running: false, total: 0, done: 0, failed: 0, current: [],
-  });
-  const bulkAbortedRef = React.useRef(false);
+  const { data: scanSessions } = useScanSessions();
 
   const queryParams = { page, limit: 25, sort, order, ...filters };
   const { data, isLoading } = useSites(queryParams);
@@ -206,85 +190,21 @@ export default function ExplorerView() {
     }
   };
 
-  /** Rescan all selected domains, 3 at a time, with live progress. */
-  const rescanSelected = async () => {
-    if (bulkScan.running) return;
+  /** Rescan all selected domains via the global ScanQueueContext. */
+  const rescanSelected = () => {
+    if (scan.running) return;
     const domains = Array.from(selectedDomains);
     if (domains.length === 0) return;
 
-    // Fetch full site records for URL lookup (url field may differ from domain)
+    // Pass the current page's rows as a siteMap so the context can look up each
+    // domain's existing URL and field values for diffing.
     const allRows: any[] = data?.data || [];
-    const siteMap: Record<string, any> = {};
+    const siteMap: Record<string, { url?: string; [key: string]: unknown }> = {};
     for (const row of allRows) {
       if (row.domain) siteMap[String(row.domain)] = row;
     }
 
-    bulkAbortedRef.current = false;
-    setBulkScan({ running: true, total: domains.length, done: 0, failed: 0, current: [] });
-
-    const { scanSite } = await import('../scanner/orchestrator');
-    const { computeDiff } = await import('../lib/diff');
-
-    await pLimit(
-      domains,
-      BULK_CONCURRENCY,
-      async (domain) => {
-        if (bulkAbortedRef.current) return;
-
-        setBulkScan((prev) => ({ ...prev, current: [...prev.current, domain] }));
-
-        try {
-          const site = siteMap[domain] || {};
-          const url = String(site.url || `https://${domain}`);
-          const result = await scanSite(url);
-
-          if (bulkAbortedRef.current) return; // don't save if stopped
-
-          // Build diff (same logic as RescanPanel)
-          const scanFields: Record<string, unknown> = {};
-          if (result.tech_stack) {
-            const ts = result.tech_stack;
-            Object.assign(scanFields, {
-              cms: ts.cms, web_server: ts.web_server, cdn_provider: ts.cdn,
-              hosting_provider: ts.hosting_provider,
-              https_enforced: ts.https_enforced, hsts: ts.hsts,
-            });
-            if (ts.dap) Object.assign(scanFields, { dap: ts.dap.detected, ga_tag_id: ts.dap.ga_tag_id });
-            if (ts.wordpress) Object.assign(scanFields, { wp_version: ts.wordpress.version, wp_theme: ts.wordpress.theme });
-          }
-          if (result.sitemap) Object.assign(scanFields, { sitemap_xml_detected: result.sitemap.detected });
-          if (result.robots)  Object.assign(scanFields, { robots_txt_detected: result.robots.detected });
-          if (result.dns)     Object.assign(scanFields, { ipv6: result.dns.ipv6 });
-
-          const relevantSiteFields: Record<string, unknown> = {};
-          for (const key of Object.keys(scanFields)) relevantSiteFields[key] = site[key];
-          const diff = computeDiff(relevantSiteFields, scanFields);
-
-          await api.postScan(domain, result, diff);
-
-          setBulkScan((prev) => ({
-            ...prev,
-            done: prev.done + 1,
-            current: prev.current.filter((d) => d !== domain),
-          }));
-        } catch {
-          setBulkScan((prev) => ({
-            ...prev,
-            failed: prev.failed + 1,
-            current: prev.current.filter((d) => d !== domain),
-          }));
-        }
-      },
-      () => bulkAbortedRef.current,
-    );
-
-    setBulkScan((prev) => ({ ...prev, running: false, current: [] }));
-    qc.invalidateQueries({ queryKey: ['sites'] });
-    qc.invalidateQueries({ queryKey: ['stats'] });
-  };
-
-  const stopBulkRescan = () => {
-    bulkAbortedRef.current = true;
+    startScan({ domains, siteMap, label: 'Bulk rescan' });
   };
 
   /** Download selected rows as structured JSON for use with Glean or other tools */
@@ -342,6 +262,69 @@ export default function ExplorerView() {
 
         <DomainImportModal open={importOpen} onOpenChange={setImportOpen} />
 
+        {/* Scan history bar — shown when sessions exist and not currently scanning */}
+        {!scan.running && Array.isArray(scanSessions) && scanSessions.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 border-b border-gray-200 text-xs">
+            <button
+              onClick={() => setHistoryOpen((v) => !v)}
+              className="flex items-center gap-1 text-gray-500 hover:text-gray-700"
+              aria-expanded={historyOpen}
+            >
+              <span aria-hidden="true">{historyOpen ? '▾' : '▸'}</span>
+              Scan history ({scanSessions.length})
+            </button>
+            {!historyOpen && (
+              <span className="text-gray-400">
+                Last: {(scanSessions[0] as any).label || '(unlabeled)'}
+                {' — '}
+                {(scanSessions[0] as any).status === 'running' ? (
+                  <span className="text-blue-600">still running</span>
+                ) : (scanSessions[0] as any).status === 'completed' ? (
+                  <span className="text-green-600">✓ completed</span>
+                ) : (
+                  <span className="text-yellow-600">⏹ stopped</span>
+                )}
+                {' · '}
+                {formatRelativeTime(String((scanSessions[0] as any).started_at))}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Expanded scan history list */}
+        {historyOpen && Array.isArray(scanSessions) && scanSessions.length > 0 && (
+          <div className="border-b border-gray-200 bg-gray-50">
+            <table className="w-full text-xs" aria-label="Scan history">
+              <thead>
+                <tr className="text-gray-400 border-b border-gray-200">
+                  <th className="text-left px-3 py-1 font-medium">Label</th>
+                  <th className="text-left px-3 py-1 font-medium">Status</th>
+                  <th className="text-right px-3 py-1 font-medium">Domains</th>
+                  <th className="text-right px-3 py-1 font-medium">Done</th>
+                  <th className="text-right px-3 py-1 font-medium">Failed</th>
+                  <th className="text-right px-3 py-1 font-medium">Started</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(scanSessions as any[]).map((s) => (
+                  <tr key={s.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-100">
+                    <td className="px-3 py-1 text-gray-700">{s.label || <span className="text-gray-400 italic">—</span>}</td>
+                    <td className="px-3 py-1">
+                      {s.status === 'running' && <span className="text-blue-600">🔄 running</span>}
+                      {s.status === 'completed' && <span className="text-green-600">✓ done</span>}
+                      {s.status === 'stopped' && <span className="text-yellow-600">⏹ stopped</span>}
+                    </td>
+                    <td className="px-3 py-1 text-right text-gray-500">{s.total_domains}</td>
+                    <td className="px-3 py-1 text-right text-green-600">{s.completed_count}</td>
+                    <td className="px-3 py-1 text-right text-red-500">{s.failed_count || '—'}</td>
+                    <td className="px-3 py-1 text-right text-gray-400">{formatRelativeTime(String(s.started_at))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {/* Bulk selection action bar — only shown when rows are selected */}
         {selectedDomains.size > 0 && (
           <div className="flex items-center gap-3 px-3 py-1.5 bg-blue-50 border-b border-blue-200 text-xs flex-wrap">
@@ -349,22 +332,22 @@ export default function ExplorerView() {
               <span aria-hidden="true">✓ </span>{selectedDomains.size.toLocaleString()} selected
               {selectedOnPage < selectedDomains.size && ` (${selectedOnPage} on this page)`}
             </span>
-            <button onClick={exportSelected} disabled={bulkScan.running} className="btn-primary text-xs py-0.5 px-2">
+            <button onClick={exportSelected} disabled={scan.running} className="btn-primary text-xs py-0.5 px-2">
               Export JSON <span aria-hidden="true">↓</span>
             </button>
-            {!bulkScan.running ? (
+            {!scan.running ? (
               <button onClick={rescanSelected} className="btn-secondary text-xs py-0.5 px-2">
                 <span aria-hidden="true">🔄 </span>Rescan selected
               </button>
             ) : (
-              <button onClick={stopBulkRescan} className="btn-secondary text-xs py-0.5 px-2 text-red-600 border-red-300">
+              <button onClick={stopScan} className="btn-secondary text-xs py-0.5 px-2 text-red-600 border-red-300">
                 <span aria-hidden="true">⏹ </span>Stop
               </button>
             )}
-            <button onClick={clearSelection} disabled={bulkScan.running} className="btn-secondary text-xs py-0.5 px-2">
+            <button onClick={clearSelection} disabled={scan.running} className="btn-secondary text-xs py-0.5 px-2">
               Clear selection
             </button>
-            {showSelectAllBanner && !bulkScan.running && (
+            {showSelectAllBanner && !scan.running && (
               <button
                 onClick={selectAllMatching}
                 disabled={selectAllLoading}
@@ -376,20 +359,12 @@ export default function ExplorerView() {
               </button>
             )}
             {/* Bulk rescan progress */}
-            {bulkScan.running && (
+            {scan.running && (
               <span className="text-blue-700 ml-1" role="status" aria-live="polite" aria-atomic="true">
-                Scanning {bulkScan.current.length} at a time —{' '}
-                {bulkScan.done + bulkScan.failed} of {bulkScan.total} done
-                {bulkScan.failed > 0 && (
-                  <span className="text-red-500 ml-1">({bulkScan.failed} failed)</span>
-                )}
-              </span>
-            )}
-            {!bulkScan.running && bulkScan.total > 0 && (
-              <span className="text-green-700 ml-1" role="status" aria-live="polite">
-                <span aria-hidden="true">✓ </span>Rescan complete — {bulkScan.done} updated
-                {bulkScan.failed > 0 && (
-                  <span className="text-red-500 ml-1">, {bulkScan.failed} failed</span>
+                Scanning {scan.current.length} at a time —{' '}
+                {scan.done + scan.failed} of {scan.total} done
+                {scan.failed > 0 && (
+                  <span className="text-red-500 ml-1">({scan.failed} failed)</span>
                 )}
               </span>
             )}
