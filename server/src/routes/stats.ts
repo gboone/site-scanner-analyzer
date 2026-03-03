@@ -29,7 +29,7 @@ router.get('/', async (req: Request, res: Response) => {
   if (bureau) { conditions.push('bureau = :bureau'); params.bureau = bureau; }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // Async helper — COUNT(*) returns as string in PostgreSQL, cast with Number()
+  // Async helper — COUNT(*) returns as a string from mysql2, cast with Number()
   const qn = async (sql: string) => Number((await query(sql, params))[0]?.n ?? 0);
 
   const total              = await qn(`SELECT COUNT(*) as n FROM sites ${where}`);

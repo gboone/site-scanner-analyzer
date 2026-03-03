@@ -184,7 +184,7 @@ router.post('/', async (req: Request, res: Response) => {
   updates.last_scan_id = scanId;
 
   const cols = Object.keys(updates).filter(k => k !== 'domain');
-  const setClause = cols.map(k => `${k} = :${k}`).join(', ');
+  const setClause = cols.map(k => `\`${k}\` = :${k}`).join(', ');
   updates.domain = domain;
   await execute(`UPDATE sites SET ${setClause} WHERE domain = :domain`, updates);
 

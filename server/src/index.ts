@@ -53,7 +53,7 @@ async function main() {
     ANTHROPIC_API_KEY: 'anthropicApiKey',
   };
   const savedSettings = await query<{ key: string; value: string }>(
-    'SELECT key, value FROM settings'
+    'SELECT `key`, value FROM settings'
   );
   for (const row of savedSettings) {
     const configKey = configMap[row.key];
@@ -123,7 +123,7 @@ async function main() {
   // Settings endpoint (simple key/value store)
   app.get('/api/v1/settings', async (_req, res) => {
     const rows = await query<{ key: string; value: string }>(
-      'SELECT key, value FROM settings'
+      'SELECT `key`, value FROM settings'
     );
     const settings: Record<string, string> = {};
     for (const row of rows) settings[row.key] = row.value;
@@ -139,7 +139,7 @@ async function main() {
       return;
     }
     await execute(
-      `INSERT INTO settings (key, value)
+      `INSERT INTO settings (\`key\`, value)
        VALUES (:key, :value)
        ON DUPLICATE KEY UPDATE
          value      = VALUES(value),
