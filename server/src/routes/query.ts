@@ -4,8 +4,8 @@ import { pool } from '../db';
 const router = Router();
 
 // Fast-fail UX hint: only SELECT-shaped queries get through.
-// The real enforcement is the READ ONLY transaction below —
-// it rejects writes at the engine level, bypassing any regex tricks.
+// mysql2 executes a single statement per query() call (multipleStatements
+// is off by default), which prevents semicolon-chained write attacks.
 const ALLOWED = /^\s*select/i;
 
 router.post('/', async (req: Request, res: Response) => {
@@ -22,19 +22,18 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  // Acquire a dedicated connection and run inside a READ ONLY transaction.
-  // MariaDB/MySQL will reject any write statement at the engine level,
-  // regardless of SQL tricks like comments or semicolons.
+  // Acquire a dedicated connection so this query doesn't interfere with the
+  // shared pool. No explicit transaction — START TRANSACTION READ ONLY is not
+  // reliably supported by all MySQL-compatible proxies (VIP, ProxySQL, etc.).
+  // Protection comes from the SELECT-only regex above and mysql2's default
+  // single-statement mode (multipleStatements: false).
   const client = await pool.getConnection();
   const start = Date.now();
   try {
-    await client.query('START TRANSACTION READ ONLY');
     const [rows] = await client.query(trimmed);
-    await client.query('ROLLBACK'); // no writes to commit; ROLLBACK is a clean exit
     const duration_ms = Date.now() - start;
     res.json({ rows, count: (rows as any[]).length, duration_ms });
   } catch (err: any) {
-    await client.query('ROLLBACK').catch(() => {});
     console.error('[query] SQL error:', err.message);
     res.status(400).json({ error: 'Query failed. Check your SQL syntax and try again.' });
   } finally {

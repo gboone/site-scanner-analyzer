@@ -13,13 +13,35 @@ import scansRouter from './routes/scans';
 import proxyRouter from './routes/proxy';
 import gsaRouter from './routes/gsa';
 import briefingsRouter from './routes/briefings';
+import scanSessionsRouter from './routes/scan-sessions';
 import { agenciesRouter, bureausRouter } from './routes/agencies';
 import { validateUrlForSsrf } from './middleware/ssrf-protection';
 
 const app = express();
 
 async function main() {
-  // Initialize DB first — all routes depend on the schema being present
+  // ---------------------------------------------------------------------------
+  // 1. Health check + early listen — registered before ANY async work so VIP's
+  //    probe gets a 200 immediately. VIP serves 503 to all users if this returns
+  //    non-200, and it will declare the deploy "crashed" if the port isn't
+  //    accepting connections within its startup window.
+  // ---------------------------------------------------------------------------
+  app.get('/cache-healthcheck', (_req, res) => {
+    res.json({ status: 'ok' });
+  });
+
+  // Start accepting connections NOW, before initDb() runs. Express registers
+  // middleware/routes in order at request time, so everything registered below
+  // still takes full effect — we're just ensuring the port is open early so
+  // VIP's health probe doesn't time out while the schema migration runs.
+  await new Promise<void>((resolve, reject) => {
+    app.listen(config.port, () => resolve()).on('error', reject);
+  });
+  console.log(`✓ Server listening at http://localhost:${config.port}`);
+
+  // ---------------------------------------------------------------------------
+  // 2. Initialize DB — runs after server is already accepting health checks
+  // ---------------------------------------------------------------------------
   await initDb();
 
   // Load any settings previously saved via the UI into the live config object.
@@ -32,7 +54,7 @@ async function main() {
     ANTHROPIC_API_KEY: 'anthropicApiKey',
   };
   const savedSettings = await query<{ key: string; value: string }>(
-    'SELECT key, value FROM settings'
+    'SELECT `key`, value FROM settings'
   );
   for (const row of savedSettings) {
     const configKey = configMap[row.key];
@@ -43,15 +65,7 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------------
-  // 1. Health check — MUST come before auth so VIP's checker (no credentials)
-  //    always gets a 200. VIP serves 503 to all users if this returns non-200.
-  // ---------------------------------------------------------------------------
-  app.get('/cache-healthcheck', (_req, res) => {
-    res.json({ status: 'ok' });
-  });
-
-  // ---------------------------------------------------------------------------
-  // 2. HTTP Basic Auth (optional) — set AUTH_PASSWORD to enable; omit in dev
+  // 3. HTTP Basic Auth (optional) — set AUTH_PASSWORD to enable; omit in dev
   // ---------------------------------------------------------------------------
   if (process.env.AUTH_PASSWORD) {
     const authUser = process.env.AUTH_USER ?? 'admin';
@@ -103,14 +117,15 @@ async function main() {
   app.use('/api/v1/scans',     scansRouter);
   app.use('/api/v1/proxy',     proxyRouter);
   app.use('/api/v1/gsa',       gsaRouter);
-  app.use('/api/v1/briefings', briefingsRouter);
-  app.use('/api/v1/agencies',  agenciesRouter);
-  app.use('/api/v1/bureaus',   bureausRouter);
+  app.use('/api/v1/briefings',      briefingsRouter);
+  app.use('/api/v1/scan-sessions',  scanSessionsRouter);
+  app.use('/api/v1/agencies',       agenciesRouter);
+  app.use('/api/v1/bureaus',        bureausRouter);
 
   // Settings endpoint (simple key/value store)
   app.get('/api/v1/settings', async (_req, res) => {
     const rows = await query<{ key: string; value: string }>(
-      'SELECT key, value FROM settings'
+      'SELECT `key`, value FROM settings'
     );
     const settings: Record<string, string> = {};
     for (const row of rows) settings[row.key] = row.value;
@@ -126,7 +141,7 @@ async function main() {
       return;
     }
     await execute(
-      `INSERT INTO settings (key, value)
+      `INSERT INTO settings (\`key\`, value)
        VALUES (:key, :value)
        ON DUPLICATE KEY UPDATE
          value      = VALUES(value),
@@ -180,13 +195,11 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------------
-  // 6. Start
+  // 6. Ready
   // ---------------------------------------------------------------------------
-  app.listen(config.port, () => {
-    console.log(`✓ Server running at http://localhost:${config.port}`);
-    console.log(`  - Glean: ${config.gleanEndpoint ? '✓ configured' : '✗ not configured'}`);
-    console.log(`  - GSA API: ${config.gsaApiKey ? '✓ configured' : '✗ not configured'}`);
-  });
+  console.log(`  - Glean: ${config.gleanEndpoint ? '✓ configured' : '✗ not configured'}`);
+  console.log(`  - GSA API: ${config.gsaApiKey ? '✓ configured' : '✗ not configured'}`);
+  console.log('✓ Startup complete — all routes active');
 }
 
 main().catch((err) => {

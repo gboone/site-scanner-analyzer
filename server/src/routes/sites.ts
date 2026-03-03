@@ -49,22 +49,27 @@ router.get('/', async (req: Request, res: Response) => {
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // COUNT(*) may be returned as a string — cast to Number
-  const countRows = await query<{ count: string }>(`SELECT COUNT(*) as count FROM sites ${where}`, params);
-  const total = Number(countRows[0].count);
+  try {
+    // COUNT(*) may be returned as a string — cast to Number
+    const countRows = await query<{ count: string }>(`SELECT COUNT(*) as count FROM sites ${where}`, params);
+    const total = Number(countRows[0].count);
 
-  const rows = await query(
-    `SELECT * FROM sites ${where} ORDER BY ${safeSort} ${order} LIMIT :limit OFFSET :offset`,
-    { ...params, limit, offset }
-  );
+    const rows = await query(
+      `SELECT * FROM sites ${where} ORDER BY ${safeSort} ${order} LIMIT :limit OFFSET :offset`,
+      { ...params, limit, offset }
+    );
 
-  res.json({
-    data: rows,
-    total,
-    page,
-    limit,
-    pages: Math.ceil(total / limit),
-  });
+    res.json({
+      data: rows,
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err: any) {
+    console.error('[sites] GET / error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch sites' });
+  }
 });
 
 // GET /api/v1/sites/:domain - single site with scan history

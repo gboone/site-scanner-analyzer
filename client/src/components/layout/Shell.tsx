@@ -2,6 +2,7 @@ import React from 'react';
 import type { View } from '../../App';
 import { useImport } from '../../hooks/useSites';
 import { useDropzone } from 'react-dropzone';
+import { useScanQueue } from '../../contexts/ScanQueueContext';
 
 interface ShellProps {
   currentView: View;
@@ -19,6 +20,7 @@ const NAV_ITEMS: Array<{ id: View; label: string; icon: string }> = [
 export default function Shell({ currentView, onNavigate, children }: ShellProps) {
   const importMutation = useImport();
   const [importStatus, setImportStatus] = React.useState<string | null>(null);
+  const { scan, stopScan } = useScanQueue();
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { 'application/json': ['.json'] },
@@ -86,9 +88,50 @@ export default function Shell({ currentView, onNavigate, children }: ShellProps)
             </button>
           ))}
         </nav>
-        <div className="p-3 border-t border-white/20 text-xs text-white/50" aria-hidden="true">
-          Drop JSON to import
-        </div>
+        {/* Sidebar footer — scan progress when running, hint otherwise */}
+        {scan.running ? (
+          <div className="p-3 border-t border-white/20 space-y-1.5" role="status" aria-live="polite" aria-atomic="false">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs text-white/80 font-medium truncate">
+                {scan.label || 'Scanning…'}
+              </span>
+              <button
+                onClick={stopScan}
+                className="flex-shrink-0 text-white/50 hover:text-white text-xs"
+                title="Stop scan"
+                aria-label="Stop scan"
+              >
+                ⏹
+              </button>
+            </div>
+            <div
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={scan.total}
+              aria-valuenow={scan.done + scan.failed}
+              aria-label={`${scan.done + scan.failed} of ${scan.total} scanned`}
+              className="h-1 bg-white/20 rounded-full overflow-hidden"
+            >
+              <div
+                className="h-full bg-white/60 rounded-full transition-all duration-300"
+                style={{ width: scan.total ? `${((scan.done + scan.failed) / scan.total) * 100}%` : '0%' }}
+              />
+            </div>
+            <p className="text-xs text-white/50 leading-tight">
+              {scan.done + scan.failed} / {scan.total}
+              {scan.failed > 0 && <span className="text-red-300 ml-1">({scan.failed} failed)</span>}
+              {scan.current.length > 0 && (
+                <span className="block font-mono truncate mt-0.5">
+                  {scan.current[0]}{scan.current.length > 1 ? ` +${scan.current.length - 1}` : ''}
+                </span>
+              )}
+            </p>
+          </div>
+        ) : (
+          <div className="p-3 border-t border-white/20 text-xs text-white/50" aria-hidden="true">
+            Drop JSON to import
+          </div>
+        )}
       </aside>
 
       {/* Main */}
