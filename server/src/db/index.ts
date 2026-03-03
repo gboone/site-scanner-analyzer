@@ -94,9 +94,14 @@ export async function transaction<T>(
 // Schema bootstrap — idempotent, runs at startup
 // ---------------------------------------------------------------------------
 export async function initDb(): Promise<void> {
-  // ADD COLUMN IF NOT EXISTS — supported in MariaDB 10.0.2+
+  // ADD COLUMN — silently ignores ER_DUP_FIELDNAME (1060) so this is idempotent
+  // on both MySQL and MariaDB (ALTER TABLE … IF NOT EXISTS is MariaDB-only).
   const addCol = async (col: string, type = 'TEXT') => {
-    await pool.query(`ALTER TABLE sites ADD COLUMN IF NOT EXISTS \`${col}\` ${type}`);
+    try {
+      await pool.query(`ALTER TABLE sites ADD COLUMN \`${col}\` ${type}`);
+    } catch (err: any) {
+      if (err.errno !== 1060) throw err; // 1060 = ER_DUP_FIELDNAME: column already exists
+    }
   };
 
   // ISO-format UTC timestamp default for TEXT date columns (MariaDB 10.2+)
@@ -205,12 +210,22 @@ export async function initDb(): Promise<void> {
     )
   `);
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_agency  ON sites(agency)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_bureau  ON sites(bureau)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_live    ON sites(live)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_uswds   ON sites(uswds_count)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_dap     ON sites(dap)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sites_sitemap ON sites(sitemap_xml_detected)`);
+  // CREATE INDEX — silently ignores ER_DUP_KEYNAME (1061) so this is idempotent
+  // on both MySQL and MariaDB (CREATE INDEX IF NOT EXISTS is MariaDB-only).
+  const createIndex = async (name: string, table: string, col: string) => {
+    try {
+      await pool.query(`CREATE INDEX \`${name}\` ON ${table}(\`${col}\`)`);
+    } catch (err: any) {
+      if (err.errno !== 1061) throw err; // 1061 = ER_DUP_KEYNAME: index already exists
+    }
+  };
+
+  await createIndex('idx_sites_agency',  'sites', 'agency');
+  await createIndex('idx_sites_bureau',  'sites', 'bureau');
+  await createIndex('idx_sites_live',    'sites', 'live');
+  await createIndex('idx_sites_uswds',   'sites', 'uswds_count');
+  await createIndex('idx_sites_dap',     'sites', 'dap');
+  await createIndex('idx_sites_sitemap', 'sites', 'sitemap_xml_detected');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS scan_history (
@@ -229,8 +244,8 @@ export async function initDb(): Promise<void> {
       FOREIGN KEY (domain) REFERENCES sites(domain) ON DELETE CASCADE
     )
   `);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_scan_history_domain     ON scan_history(domain)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_scan_history_scanned_at ON scan_history(scanned_at)`);
+  await createIndex('idx_scan_history_domain',     'scan_history', 'domain');
+  await createIndex('idx_scan_history_scanned_at', 'scan_history', 'scanned_at');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS briefings (
@@ -252,7 +267,7 @@ export async function initDb(): Promise<void> {
       FOREIGN KEY (domain) REFERENCES sites(domain) ON DELETE CASCADE
     )
   `);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_briefings_domain ON briefings(domain)`);
+  await createIndex('idx_briefings_domain', 'briefings', 'domain');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (
