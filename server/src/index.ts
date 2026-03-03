@@ -19,7 +19,28 @@ import { validateUrlForSsrf } from './middleware/ssrf-protection';
 const app = express();
 
 async function main() {
-  // Initialize DB first — all routes depend on the schema being present
+  // ---------------------------------------------------------------------------
+  // 1. Health check + early listen — registered before ANY async work so VIP's
+  //    probe gets a 200 immediately. VIP serves 503 to all users if this returns
+  //    non-200, and it will declare the deploy "crashed" if the port isn't
+  //    accepting connections within its startup window.
+  // ---------------------------------------------------------------------------
+  app.get('/cache-healthcheck', (_req, res) => {
+    res.json({ status: 'ok' });
+  });
+
+  // Start accepting connections NOW, before initDb() runs. Express registers
+  // middleware/routes in order at request time, so everything registered below
+  // still takes full effect — we're just ensuring the port is open early so
+  // VIP's health probe doesn't time out while the schema migration runs.
+  await new Promise<void>((resolve, reject) => {
+    app.listen(config.port, () => resolve()).on('error', reject);
+  });
+  console.log(`✓ Server listening at http://localhost:${config.port}`);
+
+  // ---------------------------------------------------------------------------
+  // 2. Initialize DB — runs after server is already accepting health checks
+  // ---------------------------------------------------------------------------
   await initDb();
 
   // Load any settings previously saved via the UI into the live config object.
@@ -43,15 +64,7 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------------
-  // 1. Health check — MUST come before auth so VIP's checker (no credentials)
-  //    always gets a 200. VIP serves 503 to all users if this returns non-200.
-  // ---------------------------------------------------------------------------
-  app.get('/cache-healthcheck', (_req, res) => {
-    res.json({ status: 'ok' });
-  });
-
-  // ---------------------------------------------------------------------------
-  // 2. HTTP Basic Auth (optional) — set AUTH_PASSWORD to enable; omit in dev
+  // 3. HTTP Basic Auth (optional) — set AUTH_PASSWORD to enable; omit in dev
   // ---------------------------------------------------------------------------
   if (process.env.AUTH_PASSWORD) {
     const authUser = process.env.AUTH_USER ?? 'admin';
@@ -180,13 +193,11 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------------
-  // 6. Start
+  // 6. Ready
   // ---------------------------------------------------------------------------
-  app.listen(config.port, () => {
-    console.log(`✓ Server running at http://localhost:${config.port}`);
-    console.log(`  - Glean: ${config.gleanEndpoint ? '✓ configured' : '✗ not configured'}`);
-    console.log(`  - GSA API: ${config.gsaApiKey ? '✓ configured' : '✗ not configured'}`);
-  });
+  console.log(`  - Glean: ${config.gleanEndpoint ? '✓ configured' : '✗ not configured'}`);
+  console.log(`  - GSA API: ${config.gsaApiKey ? '✓ configured' : '✗ not configured'}`);
+  console.log('✓ Startup complete — all routes active');
 }
 
 main().catch((err) => {
