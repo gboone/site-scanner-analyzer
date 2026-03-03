@@ -104,7 +104,7 @@ export async function initDb(): Promise<void> {
     }
   };
 
-  // ISO-format UTC timestamp default for TEXT date columns (MariaDB 10.2+)
+  // ISO-format UTC timestamp default for TEXT date columns (MySQL 8.0.13+)
   const TS_DEFAULT = `DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ')`;
 
   await pool.query(`
