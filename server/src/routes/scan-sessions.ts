@@ -40,7 +40,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 // PATCH /api/v1/scan-sessions/:id — update progress or finalise a session
 router.patch('/:id', async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) {
     res.status(400).json({ error: 'Invalid session id' });
     return;

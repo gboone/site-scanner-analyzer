@@ -1,13 +1,14 @@
 services:
   db:
-    image: postgres:16
+    image: mysql:8.0
     environment:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: scanner
+      MYSQL_ROOT_PASSWORD: scanner
+      MYSQL_DATABASE: scanner
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
 
 volumes:
-  pg_data:
+  mysql_data:
