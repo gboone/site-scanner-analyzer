@@ -212,16 +212,18 @@ export async function initDb(): Promise<void> {
 
   // CREATE INDEX — silently ignores ER_DUP_KEYNAME (1061) so this is idempotent
   // on both MySQL and MariaDB (CREATE INDEX IF NOT EXISTS is MariaDB-only).
-  const createIndex = async (name: string, table: string, col: string) => {
+  // TEXT columns require a prefix length (191 = safe max for utf8mb4 3-byte chars).
+  const createIndex = async (name: string, table: string, col: string, prefix?: number) => {
+    const colSpec = prefix ? `\`${col}\`(${prefix})` : `\`${col}\``;
     try {
-      await pool.query(`CREATE INDEX \`${name}\` ON ${table}(\`${col}\`)`);
+      await pool.query(`CREATE INDEX \`${name}\` ON \`${table}\`(${colSpec})`);
     } catch (err: any) {
       if (err.errno !== 1061) throw err; // 1061 = ER_DUP_KEYNAME: index already exists
     }
   };
 
-  await createIndex('idx_sites_agency',  'sites', 'agency');
-  await createIndex('idx_sites_bureau',  'sites', 'bureau');
+  await createIndex('idx_sites_agency',  'sites', 'agency',            191); // TEXT col
+  await createIndex('idx_sites_bureau',  'sites', 'bureau',            191); // TEXT col
   await createIndex('idx_sites_live',    'sites', 'live');
   await createIndex('idx_sites_uswds',   'sites', 'uswds_count');
   await createIndex('idx_sites_dap',     'sites', 'dap');
@@ -245,7 +247,7 @@ export async function initDb(): Promise<void> {
     )
   `);
   await createIndex('idx_scan_history_domain',     'scan_history', 'domain');
-  await createIndex('idx_scan_history_scanned_at', 'scan_history', 'scanned_at');
+  await createIndex('idx_scan_history_scanned_at', 'scan_history', 'scanned_at', 191); // TEXT col
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS briefings (
