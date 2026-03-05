@@ -82,6 +82,15 @@ router.get('/:domain', async (req: Request, res: Response) => {
     return;
   }
 
+  // ETag based on domain + updated_at — lets browsers and CDNs skip re-fetching unchanged records
+  const etag = `"${domain}-${(site as any).updated_at || 'nodate'}"`;
+  res.set('ETag', etag);
+  res.set('Cache-Control', 'private, max-age=300');
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).end();
+    return;
+  }
+
   const scanHistory = await query(
     'SELECT * FROM scan_history WHERE domain = ? ORDER BY scanned_at DESC LIMIT 20',
     [domain]

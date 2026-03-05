@@ -15,10 +15,24 @@ function Val({ val, json }: { val: unknown; json?: boolean }) {
     try {
       const parsed = JSON.parse(val);
       if (Array.isArray(parsed)) {
+        const label = (v: unknown): string => {
+          if (typeof v === 'object' && v !== null) {
+            const obj = v as Record<string, unknown>;
+            return String(obj.name ?? obj.label ?? obj.value ?? JSON.stringify(v));
+          }
+          return String(v);
+        };
+        const title = (v: unknown): string | undefined => {
+          if (typeof v === 'object' && v !== null) {
+            const obj = v as Record<string, unknown>;
+            return obj.category ? String(obj.category) : undefined;
+          }
+          return undefined;
+        };
         return (
           <div className="flex flex-wrap gap-1 mt-1">
             {parsed.slice(0, 10).map((v, i) => (
-              <span key={i} className="badge badge-gray">{String(v)}</span>
+              <span key={i} className="badge badge-gray" title={title(v)}>{label(v)}</span>
             ))}
             {parsed.length > 10 && <span className="text-gray-400 text-xs">+{parsed.length - 10} more</span>}
           </div>

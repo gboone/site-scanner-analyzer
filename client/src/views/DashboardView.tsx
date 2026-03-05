@@ -4,65 +4,93 @@ import {
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { useStats } from '../hooks/useSites';
+import { useUIStore } from '../store/uiStore';
 import { api } from '../lib/api';
-import AgencyBureauFilter from '../components/AgencyBureauFilter';
+import type { StatsResponse } from 'shared';
+import type { View } from '../App';
+import ReportScopePicker from '../components/reports/ReportScopePicker';
+import ReportHeader from '../components/reports/ReportHeader';
+import ScanCoverageAlert from '../components/reports/ScanCoverageAlert';
+import { exportPPT } from '../lib/export';
 
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+interface Props {
+  onNavigate: (view: View) => void;
+}
+
+const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6'];
+const GOV_BLUE = '#005EA2';
+const GOV_BLUE_LIGHT = '#73B3E7';
+
+function truncate(name: string | null | undefined, maxLen = 28) {
+  const safe = name ?? '';
+  const short = safe.split(' - ').pop() || safe;
+  return short.length > maxLen ? short.slice(0, maxLen - 1) + '…' : short;
+}
+
+function StatTile({ label, value, sub, good }: { label: string; value: string | number; sub?: string; good?: boolean }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
-      <div className="text-2xl font-bold text-gray-900">{value}</div>
-      <div className="text-sm text-gray-600 mt-1">{label}</div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+    <div className="bg-white border border-gray-200 rounded-lg p-4 flex flex-col gap-1">
+      <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">{label}</span>
+      <span className={`text-2xl font-bold ${good === true ? 'text-green-600' : good === false ? 'text-red-500' : 'text-gray-800'}`}>
+        {value}
+      </span>
+      {sub && <span className="text-xs text-gray-400">{sub}</span>}
     </div>
   );
 }
 
-const GOV_BLUE = '#005EA2';
-const GOV_BLUE_LIGHT = '#73B3E7';
-const PIE_COLORS = ['#2e7d32', '#c62828', '#f57c00'];
-
-function truncateBureau(name: string, maxLen = 28) {
-  const short = name.split(' - ').pop() || name;
-  return short.length > maxLen ? short.slice(0, maxLen - 1) + '…' : short;
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-4">
+      <h3 className="text-sm font-semibold text-gray-700 mb-4">{title}</h3>
+      {children}
+    </div>
+  );
 }
 
 type AiProvider = 'claude' | 'glean';
 
-export default function DashboardView() {
-  const [agency, setAgency] = React.useState('');
-  const [bureau, setBureau] = React.useState('');
-  const [activeFilter, setActiveFilter] = React.useState<{ agency?: string; bureau?: string }>({});
+export default function DashboardView({ onNavigate }: Props) {
+  const { reportConfig, clearReport } = useUIStore();
 
-  const { data: stats, isLoading } = useStats(activeFilter);
-
-  // AI summary state
+  // AI summary (preserved from old dashboard)
   const [aiProvider, setAiProvider] = React.useState<AiProvider>('claude');
   const [aiSummary, setAiSummary] = React.useState<string | null>(null);
   const [aiLoading, setAiLoading] = React.useState(false);
   const [aiError, setAiError] = React.useState<string | null>(null);
 
-  const applyFilter = () => {
-    setActiveFilter({
-      agency: agency.trim() || undefined,
-      bureau: bureau.trim() || undefined,
-    });
-    setAiSummary(null);
-  };
+  // Build filter for the stats hook based on reportConfig scope
+  const statsFilter = React.useMemo(() => {
+    if (!reportConfig) return undefined;
+    if (reportConfig.scope === 'agency') {
+      return {
+        agency: reportConfig.agency,
+        bureau: reportConfig.bureaus?.[0],
+      };
+    }
+    // 'selection' or 'sql' — use explicit domain list
+    return reportConfig.domains?.length
+      ? { domains: reportConfig.domains }
+      : undefined;
+  }, [reportConfig]);
 
-  const clearFilter = () => {
-    setAgency('');
-    setBureau('');
-    setActiveFilter({});
-    setAiSummary(null);
+  const { data: stats, isLoading, isError, error } = useStats(statsFilter) as {
+    data: StatsResponse | undefined;
+    isLoading: boolean;
+    isError: boolean;
+    error: Error | null;
   };
 
   const generateSummary = async () => {
-    if (!stats) return;
+    if (!stats || !reportConfig) return;
     setAiLoading(true);
     setAiError(null);
     setAiSummary(null);
     try {
-      const res = await api.summarizeDashboard(aiProvider, activeFilter) as any;
+      const filter = reportConfig.scope === 'agency'
+        ? { agency: reportConfig.agency, bureau: reportConfig.bureaus?.[0] }
+        : undefined;
+      const res = await api.summarizeDashboard(aiProvider, filter) as any;
       setAiSummary(res?.summary || JSON.stringify(res, null, 2));
     } catch (err: any) {
       setAiError(err.message);
@@ -71,103 +99,209 @@ export default function DashboardView() {
     }
   };
 
-  if (isLoading) return <div className="flex items-center justify-center h-full text-gray-400" role="status" aria-live="polite">Loading…</div>;
-  if (!stats) return <div className="p-8 text-gray-400">No data yet. Import data first or use Settings → Import from GSA.</div>;
+  const handleExportJSON = () => {
+    if (!stats) return;
+    const payload = { reportConfig, stats };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dashboard-report-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
-  const s = stats as any;
+  const handleClearReport = () => {
+    clearReport();
+    setAiSummary(null);
+  };
 
-  const bureauUswdsData = (s.by_bureau as any[])
+  // ── No report config → scope picker ────────────────────────────────────
+  if (!reportConfig) {
+    return <ReportScopePicker onNavigate={onNavigate} />;
+  }
+
+  // ── Loading ─────────────────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full text-gray-400" role="status" aria-live="polite">
+        Loading report…
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-red-500">
+        <p className="font-semibold">Failed to load report data.</p>
+        {error && <p className="text-sm text-gray-500 max-w-md text-center">{error.message}</p>}
+        <button onClick={handleClearReport} className="btn-secondary text-sm">← New report</button>
+      </div>
+    );
+  }
+
+  if (!stats) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-400">
+        <p>No data returned for this scope.</p>
+        <button onClick={handleClearReport} className="btn-secondary text-sm">← New report</button>
+      </div>
+    );
+  }
+
+  const s = stats;
+  const total = s.total_sites;
+
+  // ── Chart data ───────────────────────────────────────────────────────────
+  const bureauUswdsData = (s.by_bureau ?? [])
     .slice(0, 12)
-    .map((b: any) => ({
-      name: truncateBureau(b.bureau),
-      uswds: Number((b.uswds_avg ?? 0).toFixed(1)),
-    }));
+    .map((b) => ({ name: truncate(b.bureau), uswds: Number(Number(b.uswds_avg ?? 0).toFixed(1)) }));
 
   const sitemapData = [
-    { name: 'Detected', value: s.sitemap_health.detected },
-    { name: 'Not detected', value: s.sitemap_health.not_detected },
+    { name: 'Detected',     value: s.sitemap_health.detected     },
+    { name: 'Not detected', value: s.sitemap_health.not_detected  },
     ...(s.sitemap_health.error > 0 ? [{ name: 'Error', value: s.sitemap_health.error }] : []),
   ];
 
-  const thirdPartyData = (s.top_third_party_domains as any[])
+  const thirdPartyData = (s.top_third_party_domains ?? [])
     .slice(0, 12)
-    .map((d: any) => ({
-      name: d.domain,
-      sites: d.site_count,
-    }));
+    .map((d) => ({ name: d.domain, sites: d.site_count }));
 
-  const bureauSiteData = ((s.by_bureau_sites || s.by_bureau) as any[])
+  const bureauSiteData = ((s.by_bureau_sites || s.by_bureau) ?? [])
     .slice(0, 10)
-    .map((b: any) => ({
-      name: truncateBureau(b.bureau, 22),
-      sites: b.count,
-    }));
+    .map((b) => ({ name: truncate(b.bureau, 22), sites: b.count }));
 
-  const hasFilter = !!(activeFilter.agency || activeFilter.bureau);
+  const cmsData = (s.by_cms ?? [])
+    .slice(0, 8)
+    .map((r) => ({ name: r.cms || 'Unknown', value: r.count }));
+
+  const httpsDonut = [
+    { name: 'Enforced',     value: s.https_enforced_count },
+    { name: 'Not enforced', value: total - s.https_enforced_count },
+  ];
+
+  const uswdsDonut = [
+    { name: 'USWDS',    value: s.uswds_any_count },
+    { name: 'No USWDS', value: total - s.uswds_any_count },
+  ];
+
+  const lcpData = s.performance_summary?.lcp
+    ? [
+        { name: 'Good (<2.5s)',    value: s.performance_summary.lcp.good },
+        { name: 'Needs work',      value: s.performance_summary.lcp.needs_improvement },
+        { name: 'Poor (>4s)',      value: s.performance_summary.lcp.poor },
+        { name: 'No data',         value: s.performance_summary.lcp.no_data },
+      ].filter((d) => d.value > 0)
+    : [];
+
+  const clsData = s.performance_summary?.cls
+    ? [
+        { name: 'Good (<0.1)',    value: s.performance_summary.cls.good },
+        { name: 'Needs work',     value: s.performance_summary.cls.needs_improvement },
+        { name: 'Poor (>0.25)',   value: s.performance_summary.cls.poor },
+        { name: 'No data',        value: s.performance_summary.cls.no_data },
+      ].filter((d) => d.value > 0)
+    : [];
+
+  const branchData = (s.by_branch ?? []).map((b) => ({ name: b.branch || 'Unknown', value: b.count }));
+
+  const PIE_COLORS_SITEMAP = ['#2e7d32', '#c62828', '#f57c00'];
+  const PERF_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#9ca3af'];
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="p-6 max-w-screen-xl mx-auto">
+    <div className="flex flex-col h-full overflow-auto print:overflow-visible">
+      <ReportHeader
+        stats={stats}
+        onClear={handleClearReport}
+        onExportJSON={handleExportJSON}
+        onExportPPT={() => exportPPT(reportConfig!, stats)}
+      />
 
-        {/* Header + filter bar */}
-        <div className="flex flex-wrap items-end gap-3 mb-6">
-          <h1 className="text-xl font-bold text-gray-900 mr-2">Dashboard</h1>
+      <div className="flex-1 px-8 py-6 max-w-screen-xl mx-auto w-full space-y-8">
 
-          <AgencyBureauFilter
-            agency={agency}
-            bureau={bureau}
-            onAgencyChange={setAgency}
-            onBureauChange={setBureau}
-            onApply={applyFilter}
-            onClear={clearFilter}
-            hasFilter={hasFilter}
-          />
+        {/* Scan coverage alert */}
+        {s.scan_coverage && <ScanCoverageAlert stats={s} />}
 
-          {/* Agency filter pills from data */}
-          {!hasFilter && (s.by_agency as any[]).length > 0 && (
-            <div className="flex gap-1.5 flex-wrap ml-1">
-              {(s.by_agency as any[]).slice(0, 6).map((a: any) => (
-                <button
-                  key={a.agency}
-                  onClick={() => { setAgency(a.agency); setActiveFilter({ agency: a.agency }); setAiSummary(null); }}
-                  aria-label={`Filter by ${a.agency}`}
-                  className="text-xs bg-gray-100 hover:bg-gov-blue hover:text-white rounded-full px-2.5 py-1 transition-colors"
-                >
-                  {a.agency}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* ── Summary stat tiles ──────────────────────────────────────── */}
+        <section aria-label="Summary stats">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Summary</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <StatTile label="Total" value={total.toLocaleString()} />
+            <StatTile
+              label="Live"
+              value={`${s.live_pct}%`}
+              sub={`${s.live_count.toLocaleString()} sites`}
+              good={s.live_pct >= 90}
+            />
+            <StatTile
+              label="HTTPS"
+              value={`${s.https_enforced_pct}%`}
+              sub={`${s.https_enforced_count.toLocaleString()} sites`}
+              good={s.https_enforced_pct >= 90}
+            />
+            <StatTile
+              label="USWDS"
+              value={`${s.uswds_any_pct}%`}
+              sub={`${s.uswds_any_count.toLocaleString()} sites`}
+            />
+            <StatTile
+              label="DAP"
+              value={`${s.dap_pct}%`}
+              sub={`${s.dap_count.toLocaleString()} sites`}
+            />
+            <StatTile
+              label="Sitemap"
+              value={`${s.sitemap_detected_pct}%`}
+              sub={`${s.sitemap_detected_count.toLocaleString()} sites`}
+            />
+          </div>
+        </section>
 
-        {/* Active filter banner */}
-        {hasFilter && (
-          <div className="mb-5 text-sm text-gov-blue bg-blue-50 border border-blue-200 rounded px-3 py-2">
-            Showing data for{' '}
-            {activeFilter.agency && <><strong>{activeFilter.agency}</strong>{' '}</>}
-            {activeFilter.bureau && <>bureau / office: <strong>{activeFilter.bureau}</strong>{' '}</>}
-            — {s.total_sites.toLocaleString()} sites
+        {/* EOL + scan coverage secondary row */}
+        {(s.eol_risk_count > 0 || s.scan_coverage) && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {s.eol_risk_count > 0 && (
+              <StatTile
+                label="EOL Risk"
+                value={s.eol_risk_count}
+                sub="Sites on end-of-life CMS"
+                good={false}
+              />
+            )}
+            {s.scan_coverage && (
+              <>
+                <StatTile
+                  label="Never scanned"
+                  value={s.scan_coverage.never_scanned_count.toLocaleString()}
+                  sub="of total sites"
+                  good={s.scan_coverage.never_scanned_count === 0 ? true : undefined}
+                />
+                <StatTile
+                  label="Stale (>90d)"
+                  value={s.scan_coverage.stale_count.toLocaleString()}
+                  sub="sites"
+                  good={s.scan_coverage.stale_count === 0 ? true : undefined}
+                />
+                <StatTile
+                  label="Scanned"
+                  value={s.scan_coverage.scanned_count.toLocaleString()}
+                  sub="sites with fresh data"
+                  good={s.scan_coverage.scanned_count > 0 ? true : undefined}
+                />
+              </>
+            )}
           </div>
         )}
 
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-          <StatCard label="Total Sites" value={s.total_sites.toLocaleString()} />
-          <StatCard label="Live" value={`${s.live_pct}%`} sub={`${s.live_count} sites`} />
-          <StatCard label="Has USWDS" value={`${s.uswds_any_pct}%`} sub={`${s.uswds_any_count} sites`} />
-          <StatCard label="Has DAP" value={`${s.dap_pct}%`} sub={`${s.dap_count} sites`} />
-          <StatCard label="HTTPS Enforced" value={`${s.https_enforced_pct}%`} sub={`${s.https_enforced_count} sites`} />
-        </div>
-
-        {/* AI Summary panel */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+        {/* ── AI Summary ──────────────────────────────────────────────── */}
+        <section aria-label="AI summary" className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-sm font-semibold text-gray-700">AI Summary</h2>
+            <h2 className="text-sm font-semibold text-gray-700">AI Narrative Summary</h2>
             <label htmlFor="ai-provider-select" className="sr-only">AI provider</label>
             <select
               id="ai-provider-select"
               value={aiProvider}
-              onChange={e => setAiProvider(e.target.value as AiProvider)}
+              onChange={(e) => setAiProvider(e.target.value as AiProvider)}
               className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-gov-blue"
             >
               <option value="claude">Claude</option>
@@ -178,132 +312,205 @@ export default function DashboardView() {
               disabled={aiLoading}
               className="btn-primary text-xs disabled:opacity-50"
             >
-              {aiLoading ? 'Generating…' : 'Generate Summary'}
+              {aiLoading ? 'Generating…' : 'Generate'}
             </button>
             {aiSummary && (
-              <button
-                onClick={() => setAiSummary(null)}
-                className="text-xs text-gray-400 hover:text-gray-600"
-              >
+              <button onClick={() => setAiSummary(null)} className="text-xs text-gray-400 hover:text-gray-600">
                 Dismiss
               </button>
             )}
           </div>
-          {aiError && <div className="text-xs text-red-600">{aiError}</div>}
-          {aiSummary && (
-            <div className="mt-2 text-sm text-gray-700 prose prose-sm max-w-none border-t border-gray-100 pt-3 whitespace-pre-wrap">
-              {aiSummary}
-            </div>
+          {aiError && <p className="text-xs text-red-600">{aiError}</p>}
+          {aiSummary ? (
+            <div className="mt-2 text-sm text-gray-700 border-t border-gray-100 pt-3 whitespace-pre-wrap">{aiSummary}</div>
+          ) : (
+            !aiLoading && <p className="text-xs text-gray-400">Generate an AI narrative of this report scope.</p>
           )}
-          {!aiSummary && !aiError && !aiLoading && (
-            <div className="text-xs text-gray-400">
-              Generate an AI narrative summary of the current dashboard view
-              {hasFilter ? ` for ${activeFilter.agency || activeFilter.bureau}` : ''}.
+        </section>
+
+        {/* ── HTTPS + USWDS donuts ────────────────────────────────────── */}
+        <section aria-label="Adoption charts">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Adoption</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <ChartCard title="HTTPS Enforcement">
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie data={httpsDonut} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} innerRadius={45}>
+                    <Cell fill="#10b981" />
+                    <Cell fill="#e5e7eb" />
+                  </Pie>
+                  <Tooltip formatter={(v) => [v, '']} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title="USWDS Adoption">
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie data={uswdsDonut} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} innerRadius={45}>
+                    <Cell fill={GOV_BLUE} />
+                    <Cell fill="#e5e7eb" />
+                  </Pie>
+                  <Tooltip formatter={(v) => [v, '']} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            {/* CMS mix */}
+            <ChartCard title="CMS Mix">
+              {cmsData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={cmsData} layout="vertical" margin={{ left: 0, right: 8 }}>
+                    <XAxis type="number" tick={{ fontSize: 10 }} />
+                    <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 10 }} />
+                    <Tooltip />
+                    <Bar dataKey="value" name="Sites" radius={[0, 3, 3, 0]}>
+                      {cmsData.map((_, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-xs text-gray-400 py-8 text-center">No CMS data</p>
+              )}
+            </ChartCard>
+          </div>
+        </section>
+
+        {/* ── Performance ─────────────────────────────────────────────── */}
+        {(lcpData.length > 0 || clsData.length > 0) && (
+          <section aria-label="Performance">
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Performance</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {lcpData.length > 0 && (
+                <ChartCard title="Largest Contentful Paint (LCP)">
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={lcpData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70}>
+                        {lcpData.map((_, i) => <Cell key={i} fill={PERF_COLORS[i]} />)}
+                      </Pie>
+                      <Tooltip />
+                      <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              )}
+              {clsData.length > 0 && (
+                <ChartCard title="Cumulative Layout Shift (CLS)">
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={clsData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70}>
+                        {clsData.map((_, i) => <Cell key={i} fill={PERF_COLORS[i]} />)}
+                      </Pie>
+                      <Tooltip />
+                      <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              )}
             </div>
-          )}
-        </div>
+          </section>
+        )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* ── Sitemap + Third-party + Bureau breakdown ─────────────────── */}
+        <section aria-label="Infrastructure">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Infrastructure</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-          {/* USWDS avg by bureau — horizontal bar */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4" aria-label="Bar chart: Average USWDS Score by Bureau">
-            <h2 className="text-sm font-semibold text-gray-700 mb-4">Avg USWDS Score by Bureau (top 12)</h2>
-            <p className="sr-only">Data: {bureauUswdsData.map(d => `${d.name}: ${d.uswds}`).join('; ')}</p>
-            <ResponsiveContainer width="100%" height={290}>
-              <BarChart
-                layout="vertical"
-                data={bureauUswdsData}
-                margin={{ top: 0, right: 20, left: 4, bottom: 0 }}
-              >
-                <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals />
-                <YAxis dataKey="name" type="category" width={130} tick={{ fontSize: 10 }} />
-                <Tooltip
-                  formatter={(val: any) => [`${val}`, 'Avg USWDS score']}
-                  contentStyle={{ fontSize: 12 }}
-                />
-                <Bar dataKey="uswds" fill={GOV_BLUE} radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {/* Sitemap health */}
+            <ChartCard title="Sitemap Health">
+              <ResponsiveContainer width="100%" height={260}>
+                <PieChart>
+                  <Pie
+                    data={sitemapData}
+                    cx="50%"
+                    cy="42%"
+                    outerRadius={90}
+                    dataKey="value"
+                    label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                    labelLine={{ stroke: '#9ca3af' }}
+                  >
+                    {sitemapData.map((_, i) => (
+                      <Cell key={i} fill={PIE_COLORS_SITEMAP[i % PIE_COLORS_SITEMAP.length]} />
+                    ))}
+                  </Pie>
+                  <Legend iconSize={10} wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                  <Tooltip formatter={(v) => [`${v} sites`]} />
+                </PieChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            {/* USWDS avg by bureau */}
+            {bureauUswdsData.length > 0 && (
+              <ChartCard title="Avg USWDS Score by Bureau (top 12)">
+                <ResponsiveContainer width="100%" height={290}>
+                  <BarChart layout="vertical" data={bureauUswdsData} margin={{ top: 0, right: 20, left: 4, bottom: 0 }}>
+                    <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals />
+                    <YAxis dataKey="name" type="category" width={130} tick={{ fontSize: 10 }} />
+                    <Tooltip formatter={(v) => [`${v}`, 'Avg USWDS score']} />
+                    <Bar dataKey="uswds" fill={GOV_BLUE} radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            )}
+
+            {/* Top third-party domains */}
+            {thirdPartyData.length > 0 && (
+              <ChartCard title="Top Third-Party Domains">
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart layout="vertical" data={thirdPartyData} margin={{ top: 0, right: 20, left: 4, bottom: 0 }}>
+                    <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                    <YAxis dataKey="name" type="category" width={155} tick={{ fontSize: 10, fontFamily: 'monospace' }} />
+                    <Tooltip formatter={(v) => [`${v} sites`, 'Appears on']} />
+                    <Bar dataKey="sites" fill={GOV_BLUE_LIGHT} radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            )}
+
+            {/* Sites by bureau */}
+            {bureauSiteData.length > 0 && (
+              <ChartCard title="Sites by Bureau (top 10)">
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={bureauSiteData} margin={{ top: 0, right: 16, left: 4, bottom: 70 }}>
+                    <XAxis
+                      dataKey="name"
+                      tick={{ fontSize: 9 }}
+                      angle={-38}
+                      textAnchor="end"
+                      interval={0}
+                    />
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                    <Tooltip formatter={(v) => [`${v}`, 'Sites']} />
+                    <Bar dataKey="sites" fill={GOV_BLUE} radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            )}
+
+            {/* Branch breakdown */}
+            {branchData.length > 0 && (
+              <ChartCard title="Sites by Branch">
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie data={branchData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}>
+                      {branchData.map((_, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v) => [`${v} sites`]} />
+                    <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            )}
+
           </div>
+        </section>
 
-          {/* Sitemap health — pie */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4" aria-label="Pie chart: Sitemap Health">
-            <h2 className="text-sm font-semibold text-gray-700 mb-4">Sitemap Health</h2>
-            <p className="sr-only">Data: {sitemapData.map(d => `${d.name}: ${d.value} sites`).join('; ')}</p>
-            <ResponsiveContainer width="100%" height={290}>
-              <PieChart>
-                <Pie
-                  data={sitemapData}
-                  cx="50%"
-                  cy="42%"
-                  outerRadius={95}
-                  dataKey="value"
-                  label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                  labelLine={{ stroke: '#9ca3af' }}
-                >
-                  {sitemapData.map((_entry, index) => (
-                    <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Legend iconSize={10} wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
-                <Tooltip formatter={(val: any) => [`${val} sites`]} contentStyle={{ fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Top third-party domains — horizontal bar */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4" aria-label="Bar chart: Top Third-Party Domains">
-            <h2 className="text-sm font-semibold text-gray-700 mb-4">Top Third-Party Domains</h2>
-            <p className="sr-only">Data: {thirdPartyData.map(d => `${d.name}: ${d.sites} sites`).join('; ')}</p>
-            <ResponsiveContainer width="100%" height={310}>
-              <BarChart
-                layout="vertical"
-                data={thirdPartyData}
-                margin={{ top: 0, right: 20, left: 4, bottom: 0 }}
-              >
-                <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  width={155}
-                  tick={{ fontSize: 10, fontFamily: 'monospace' }}
-                />
-                <Tooltip
-                  formatter={(val: any) => [`${val} sites`, 'Appears on']}
-                  contentStyle={{ fontSize: 12 }}
-                />
-                <Bar dataKey="sites" fill={GOV_BLUE_LIGHT} radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Sites by bureau — vertical bar */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4" aria-label="Bar chart: Sites by Bureau">
-            <h2 className="text-sm font-semibold text-gray-700 mb-4">Sites by Bureau (top 10)</h2>
-            <p className="sr-only">Data: {bureauSiteData.map(d => `${d.name}: ${d.sites} sites`).join('; ')}</p>
-            <ResponsiveContainer width="100%" height={310}>
-              <BarChart
-                data={bureauSiteData}
-                margin={{ top: 0, right: 16, left: 4, bottom: 70 }}
-              >
-                <XAxis
-                  dataKey="name"
-                  tick={{ fontSize: 9 }}
-                  angle={-38}
-                  textAnchor="end"
-                  interval={0}
-                />
-                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                <Tooltip
-                  formatter={(val: any) => [`${val}`, 'Sites']}
-                  contentStyle={{ fontSize: 12 }}
-                />
-                <Bar dataKey="sites" fill={GOV_BLUE} radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-        </div>
       </div>
     </div>
   );

@@ -19,68 +19,153 @@ function checkSummarizeRateLimit(ip: string): boolean {
 }
 
 router.get('/', async (req: Request, res: Response) => {
+  try {
   const agency = (req.query.agency as string) || '';
   const bureau = (req.query.bureau as string) || '';
+  // Comma-separated domain list for "selection" scope reports
+  const domainsParam = (req.query.domains as string) || '';
+  const domainList = domainsParam ? domainsParam.split(',').map(d => d.trim()).filter(Boolean) : [];
 
-  // Build a WHERE clause fragment for the optional filter using named params
+  // Build WHERE clause — domain list takes priority over agency/bureau when both present
   const conditions: string[] = [];
   const params: Record<string, unknown> = {};
-  if (agency) { conditions.push('agency = :agency'); params.agency = agency; }
-  if (bureau) { conditions.push('bureau = :bureau'); params.bureau = bureau; }
+  if (domainList.length > 0) {
+    // Positional params for IN clause — handled via direct array passing below
+  } else {
+    if (agency) { conditions.push('agency = :agency'); params.agency = agency; }
+    if (bureau) { conditions.push('bureau = :bureau'); params.bureau = bureau; }
+  }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // Async helper — COUNT(*) returns as a string from mysql2, cast with Number()
-  const qn = async (sql: string) => Number((await query(sql, params))[0]?.n ?? 0);
+  // For domain-list queries we build SQL with a literal IN list (values escaped by mysql2)
+  const domainPlaceholders = domainList.length ? `(${domainList.map(() => '?').join(',')})` : null;
+  const domainWhere = domainPlaceholders ? `WHERE domain IN ${domainPlaceholders}` : null;
 
-  const total              = await qn(`SELECT COUNT(*) as n FROM sites ${where}`);
-  const live               = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} live = 1`);
-  const uswds_any          = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} uswds_count > 0`);
-  const dap_count          = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} dap = 1`);
-  const https_enforced     = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} https_enforced = 1`);
-  const sitemap_detected   = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} sitemap_xml_detected = 1`);
-  const sitemap_not_detected = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} sitemap_xml_detected = 0`);
+  // Resolve which WHERE clause + params to use for count/aggregate queries
+  const effectiveWhere = domainWhere ?? where;
+  const effectiveParams: any = domainWhere ? domainList : params;
+
+  // Async COUNT helper
+  const qn = async (sql: string, extraWhere = '', extraParams: any = {}) => {
+    const mergedWhere = effectiveWhere
+      ? `${effectiveWhere}${extraWhere ? ` AND ${extraWhere}` : ''}`
+      : extraWhere ? `WHERE ${extraWhere}` : '';
+    const mergedParams = domainWhere
+      ? (extraWhere ? [...domainList, ...Object.values(extraParams)] : domainList)
+      : { ...effectiveParams, ...extraParams };
+    return Number((await query(`SELECT COUNT(*) as n FROM sites ${mergedWhere}`, mergedParams))[0]?.n ?? 0);
+  };
+
+  const total              = await qn('');
+  const live               = await qn('', 'live = 1');
+  const uswds_any          = await qn('', 'uswds_count > 0');
+  const dap_count          = await qn('', 'dap = 1');
+  const https_enforced     = await qn('', 'https_enforced = 1');
+  const sitemap_detected   = await qn('', 'sitemap_xml_detected = 1');
+  const sitemap_not_detected = await qn('', 'sitemap_xml_detected = 0');
+
+  // Scan coverage — never scanned (scan_date IS NULL), stale (scan_date > 90 days ago)
+  const staleDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const never_scanned = await qn('', 'scan_date IS NULL');
+  const stale_count   = await qn('', `scan_date IS NOT NULL AND scan_date < '${staleDate}'`);
+  const scanned_count = total - never_scanned;
+
+  // EOL risk — simple heuristics on CMS + version fields
+  const eol_risk_count = await qn('', `(
+    (cms LIKE '%Drupal%' AND (wp_version LIKE '7.%' OR wp_version IS NULL))
+    OR (cms LIKE '%WordPress%' AND wp_version REGEXP '^[1-5]\\\\.')
+    OR cms LIKE '%SharePoint 2013%'
+    OR cms LIKE '%SharePoint 2016%'
+  )`);
+
+  // Grouped aggregations — scoped to the same effective filter
+  const groupWhere = effectiveWhere;
+  const groupParams: any = effectiveParams;
 
   const by_agency = await query(
-    `SELECT agency, COUNT(*) as count FROM sites WHERE agency IS NOT NULL GROUP BY agency ORDER BY count DESC`
+    `SELECT agency, COUNT(*) as count FROM sites WHERE agency IS NOT NULL GROUP BY agency ORDER BY count DESC`,
   );
 
-  const bureauWhere = agency ? 'WHERE agency = :agency AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
+  const bureauBaseWhere = domainWhere
+    ? `${domainWhere} AND bureau IS NOT NULL`
+    : agency ? 'WHERE agency = :agency AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
+  const bureauParams: any = domainWhere ? domainList : (agency ? { agency } : {});
+
   const by_bureau = await query(`
     SELECT bureau,
       COUNT(*) as count,
       ROUND(AVG(uswds_count), 1) as uswds_avg,
       ROUND((100.0 * SUM(CASE WHEN dap = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)), 1) as dap_pct
-    FROM sites ${bureauWhere}
+    FROM sites ${bureauBaseWhere}
     GROUP BY bureau ORDER BY count DESC LIMIT 30
-  `, agency ? { agency } : {});
+  `, bureauParams);
 
-  // Top third-party domains — uses JSON_TABLE (MariaDB 10.6+ / MySQL 8.0+)
-  // JSON_VALID guard prevents errors on non-array or malformed stored values.
-  const tpBaseConditions = conditions.length
-    ? conditions.map(c => `s.${c}`).join(' AND ') + ' AND '
-    : '';
+  const by_bureau_sites = await query(`
+    SELECT bureau, COUNT(*) as count
+    FROM sites ${bureauBaseWhere}
+    GROUP BY bureau ORDER BY count DESC LIMIT 10
+  `, bureauParams);
+
+  const by_cms = await query(`
+    SELECT COALESCE(cms, '(unknown)') as cms, COUNT(*) as count
+    FROM sites ${groupWhere}
+    GROUP BY cms ORDER BY count DESC LIMIT 15
+  `, groupParams);
+
+  const by_uswds_version = await query(`
+    SELECT COALESCE(uswds_semantic_version, '(none)') as version, COUNT(*) as count
+    FROM sites ${groupWhere}
+    GROUP BY uswds_semantic_version ORDER BY count DESC LIMIT 15
+  `, groupParams);
+
+  const by_branch = await query(`
+    SELECT COALESCE(branch, '(unknown)') as branch, COUNT(*) as count
+    FROM sites ${groupWhere}
+    GROUP BY branch ORDER BY count DESC
+  `, groupParams);
+
+  // Performance: LCP buckets (Good <2.5s, Needs improvement 2.5-4s, Poor >4s)
+  const lcpRows = await query<any>(`
+    SELECT
+      SUM(CASE WHEN CAST(largest_contentful_paint AS DECIMAL(10,3)) < 2.5 THEN 1 ELSE 0 END) as good,
+      SUM(CASE WHEN CAST(largest_contentful_paint AS DECIMAL(10,3)) BETWEEN 2.5 AND 4.0 THEN 1 ELSE 0 END) as needs_improvement,
+      SUM(CASE WHEN CAST(largest_contentful_paint AS DECIMAL(10,3)) > 4.0 THEN 1 ELSE 0 END) as poor,
+      SUM(CASE WHEN largest_contentful_paint IS NULL OR largest_contentful_paint = '' THEN 1 ELSE 0 END) as no_data
+    FROM sites ${groupWhere}
+  `, groupParams);
+
+  // CLS buckets (Good <0.1, Needs improvement 0.1-0.25, Poor >0.25)
+  const clsRows = await query<any>(`
+    SELECT
+      SUM(CASE WHEN CAST(cumulative_layout_shift AS DECIMAL(10,4)) < 0.1 THEN 1 ELSE 0 END) as good,
+      SUM(CASE WHEN CAST(cumulative_layout_shift AS DECIMAL(10,4)) BETWEEN 0.1 AND 0.25 THEN 1 ELSE 0 END) as needs_improvement,
+      SUM(CASE WHEN CAST(cumulative_layout_shift AS DECIMAL(10,4)) > 0.25 THEN 1 ELSE 0 END) as poor,
+      SUM(CASE WHEN cumulative_layout_shift IS NULL OR cumulative_layout_shift = '' THEN 1 ELSE 0 END) as no_data
+    FROM sites ${groupWhere}
+  `, groupParams);
+
+  // Top third-party domains
+  const tpBaseConditions = conditions.length ? conditions.map(c => `s.${c}`).join(' AND ') + ' AND ' : '';
+  const tpDomainWhere = domainWhere ? `s.domain IN ${domainPlaceholders} AND ` : '';
+  const tpParams: any = domainWhere ? domainList : params;
   const top_third_party = await query(`
     SELECT jt.elem AS domain, COUNT(DISTINCT s.domain) AS site_count
     FROM sites s, JSON_TABLE(
       s.third_party_service_domains,
       '$[*]' COLUMNS (elem VARCHAR(500) PATH '$')
     ) AS jt
-    WHERE ${tpBaseConditions}s.third_party_service_domains IS NOT NULL
+    WHERE ${tpDomainWhere}${tpBaseConditions}s.third_party_service_domains IS NOT NULL
       AND JSON_VALID(s.third_party_service_domains)
     GROUP BY jt.elem ORDER BY site_count DESC LIMIT 15
-  `, params);
-
-  const bureauSiteWhere = agency ? 'WHERE agency = :agency AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
-  const by_bureau_sites = await query(`
-    SELECT bureau, COUNT(*) as count
-    FROM sites ${bureauSiteWhere}
-    GROUP BY bureau ORDER BY count DESC LIMIT 10
-  `, agency ? { agency } : {});
+  `, tpParams);
 
   const pct = (n: number) => total > 0 ? Math.round((n / total) * 1000) / 10 : 0;
+  const lcp = lcpRows[0] ?? { good: 0, needs_improvement: 0, poor: 0, no_data: total };
+  const cls = clsRows[0] ?? { good: 0, needs_improvement: 0, poor: 0, no_data: total };
 
+  res.set('Cache-Control', 'private, max-age=300');
   res.json({
-    filter: { agency, bureau },
+    filter: { agency, bureau, domains: domainList.length || undefined },
     total_sites: total,
     live_count: live,
     live_pct: pct(live),
@@ -101,7 +186,20 @@ router.get('/', async (req: Request, res: Response) => {
       not_detected: sitemap_not_detected,
       error: Math.max(0, total - sitemap_detected - sitemap_not_detected),
     },
+    by_cms,
+    by_uswds_version,
+    by_branch,
+    scan_coverage: { scanned_count, never_scanned_count: never_scanned, stale_count },
+    performance_summary: {
+      lcp: { good: Number(lcp.good), needs_improvement: Number(lcp.needs_improvement), poor: Number(lcp.poor), no_data: Number(lcp.no_data) },
+      cls: { good: Number(cls.good), needs_improvement: Number(cls.needs_improvement), poor: Number(cls.poor), no_data: Number(cls.no_data) },
+    },
+    eol_risk_count: Number(eol_risk_count),
   });
+  } catch (err: any) {
+    console.error('[stats] GET / error:', err.message, '\n', err.stack);
+    res.status(500).json({ error: err.message || 'Stats query failed' });
+  }
 });
 
 /**

@@ -6,10 +6,12 @@ import ColumnToggle from '../components/data-table/ColumnToggle';
 import Pagination from '../components/data-table/Pagination';
 import SiteDetail from '../components/site-detail/SiteDetail';
 import { DomainImportModal } from '../components/import/DomainImportModal';
+import AgencyBureauFilter from '../components/AgencyBureauFilter';
 import { useSites, useScanSessions } from '../hooks/useSites';
 import { useUIStore } from '../store/uiStore';
 import { useScanQueue } from '../contexts/ScanQueueContext';
 import { api } from '../lib/api';
+import type { View } from '../App';
 
 const STATUS_COLORS: Record<number, string> = {
   200: 'badge-green', 301: 'badge-blue', 302: 'badge-blue',
@@ -123,9 +125,13 @@ function formatRelativeTime(isoString: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export default function ExplorerView() {
+interface Props {
+  onNavigate: (view: View) => void;
+}
+
+export default function ExplorerView({ onNavigate }: Props) {
   const { scan, startScan, stopScan } = useScanQueue();
-  const { openDetail, selectedDomain, detailPanelOpen } = useUIStore();
+  const { openDetail, selectedDomain, detailPanelOpen, setReport } = useUIStore();
   const [page, setPage] = React.useState(1);
   const [sort, setSort] = React.useState('domain');
   const [order, setOrder] = React.useState('asc');
@@ -140,13 +146,60 @@ export default function ExplorerView() {
 
   const { data: scanSessions } = useScanSessions();
 
-  const queryParams = { page, limit: 25, sort, order, ...filters };
+  // Agency / bureau filter — input values (what's typed) vs applied values (what queries use)
+  const [agencyInput,  setAgencyInput]  = React.useState('');
+  const [bureauInput,  setBureauInput]  = React.useState('');
+  const [agencyFilter, setAgencyFilter] = React.useState('');
+  const [bureauFilter, setBureauFilter] = React.useState('');
+
+  const queryParams = {
+    page, limit: 25, sort, order, ...filters,
+    ...(agencyFilter ? { agency: agencyFilter } : {}),
+    ...(bureauFilter ? { bureau: bureauFilter } : {}),
+  };
   const { data, isLoading } = useSites(queryParams);
 
   const handleFilter = React.useCallback((f: Record<string, string>) => {
     setFilters(f);
     setPage(1);
     setSelectedDomains(new Set()); // clear selection on filter change
+  }, []);
+
+  // When a suggestion is picked from the agency dropdown, apply it immediately and
+  // clear any bureau filter (bureaus are scoped to an agency, so the old value is stale).
+  const handleAgencySelect = React.useCallback((v: string) => {
+    setAgencyInput(v);
+    setAgencyFilter(v);
+    setBureauInput('');
+    setBureauFilter('');
+    setPage(1);
+    setSelectedDomains(new Set());
+  }, []);
+
+  // When a bureau suggestion is picked, apply it immediately.
+  const handleBureauSelect = React.useCallback((v: string) => {
+    setBureauInput(v);
+    setBureauFilter(v);
+    setPage(1);
+    setSelectedDomains(new Set());
+  }, []);
+
+  // Apply button — commits whatever is currently typed (even if not from a suggestion).
+  const handleAgencyBureauApply = React.useCallback(() => {
+    setAgencyFilter(agencyInput);
+    setBureauFilter(bureauInput);
+    setPage(1);
+    setSelectedDomains(new Set());
+  }, [agencyInput, bureauInput]);
+
+  // Clear button — wipes both inputs and applied filters.
+  const handleAgencyBureauClear = React.useCallback(() => {
+    setAgencyInput('');
+    setBureauInput('');
+    setAgencyFilter('');
+    setBureauFilter('');
+    setPage(1);
+    setSelectedDomains(new Set());
   }, []);
 
   const handleSortChange = React.useCallback((col: string, ord: 'asc' | 'desc') => {
@@ -235,6 +288,22 @@ export default function ExplorerView() {
     URL.revokeObjectURL(url);
   };
 
+  /** Navigate to the Dashboard report builder scoped to the current selection. */
+  const generateDashboardReport = () => {
+    const domains = Array.from(selectedDomains);
+    if (domains.length === 0) return;
+    setReport({ scope: 'selection', domains, createdAt: new Date().toISOString() });
+    onNavigate('dashboard');
+  };
+
+  /** Navigate to the multi-site summary report (capped at 50). */
+  const generateSummaryReport = () => {
+    const domains = Array.from(selectedDomains).slice(0, 50);
+    if (domains.length === 0) return;
+    setReport({ scope: 'selection', domains, createdAt: new Date().toISOString() });
+    onNavigate('multi-report');
+  };
+
   const totalResults = data?.total ?? 0;
   const pageSize = data?.data?.length ?? 0;
   const hasMoreThanOnePage = totalResults > pageSize && pageSize > 0;
@@ -258,6 +327,27 @@ export default function ExplorerView() {
             </button>
             <ColumnToggle table={tableInstance} />
           </div>
+        </div>
+
+        {/* Agency / bureau filter row */}
+        <div className="flex items-center gap-x-2 gap-y-1.5 flex-wrap px-4 py-2 border-b border-gray-200 bg-gray-50">
+          <span className="text-xs text-gray-500 font-medium shrink-0">Browse by:</span>
+          <AgencyBureauFilter
+            agency={agencyInput}
+            bureau={bureauInput}
+            onAgencyChange={setAgencyInput}
+            onBureauChange={setBureauInput}
+            onAgencySelect={handleAgencySelect}
+            onBureauSelect={handleBureauSelect}
+            onApply={handleAgencyBureauApply}
+            onClear={handleAgencyBureauClear}
+            hasFilter={!!(agencyInput || bureauInput)}
+          />
+          {(agencyFilter || bureauFilter) && (
+            <span className="text-xs text-gov-blue bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5 shrink-0">
+              {[agencyFilter, bureauFilter].filter(Boolean).join(' › ')}
+            </span>
+          )}
         </div>
 
         <DomainImportModal open={importOpen} onOpenChange={setImportOpen} />
@@ -335,6 +425,24 @@ export default function ExplorerView() {
             <button onClick={exportSelected} disabled={scan.running} className="btn-primary text-xs py-0.5 px-2">
               Export JSON <span aria-hidden="true">↓</span>
             </button>
+            <button
+              onClick={generateDashboardReport}
+              disabled={scan.running}
+              className="btn-secondary text-xs py-0.5 px-2"
+              title="Open aggregate report for these sites in Dashboard"
+            >
+              Dashboard report →
+            </button>
+            {selectedDomains.size >= 2 && (
+              <button
+                onClick={generateSummaryReport}
+                disabled={scan.running}
+                className="btn-secondary text-xs py-0.5 px-2"
+                title={selectedDomains.size > 50 ? `Summary for first 50 of ${selectedDomains.size} selected` : undefined}
+              >
+                Summary report{selectedDomains.size > 50 ? ` (first 50 →)` : ' →'}
+              </button>
+            )}
             {!scan.running ? (
               <button onClick={rescanSelected} className="btn-secondary text-xs py-0.5 px-2">
                 <span aria-hidden="true">🔄 </span>Rescan selected
@@ -398,7 +506,7 @@ export default function ExplorerView() {
           />
         )}
       </div>
-      <SiteDetail />
+      <SiteDetail onNavigate={onNavigate} />
     </div>
   );
 }

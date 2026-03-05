@@ -370,8 +370,19 @@ export interface StatsResponse {
   sitemap_detected_pct: number;
   by_agency: Array<{ agency: string; count: number }>;
   by_bureau: Array<{ bureau: string; count: number; uswds_avg: number; dap_pct: number }>;
+  by_bureau_sites?: Array<{ bureau: string; count: number }>;
   top_third_party_domains: Array<{ domain: string; site_count: number }>;
   sitemap_health: { detected: number; not_detected: number; error: number };
+  // Extended aggregations for the report builder
+  by_cms: Array<{ cms: string; count: number }>;
+  by_uswds_version: Array<{ version: string; count: number }>;
+  by_branch: Array<{ branch: string; count: number }>;
+  scan_coverage: { scanned_count: number; never_scanned_count: number; stale_count: number };
+  performance_summary: {
+    lcp: { good: number; needs_improvement: number; poor: number; no_data: number };
+    cls: { good: number; needs_improvement: number; poor: number; no_data: number };
+  };
+  eol_risk_count: number;
 }
 
 export interface ImportResult {
