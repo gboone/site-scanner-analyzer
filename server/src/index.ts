@@ -15,6 +15,7 @@ import gsaRouter from './routes/gsa';
 import briefingsRouter from './routes/briefings';
 import scanSessionsRouter from './routes/scan-sessions';
 import { agenciesRouter, bureausRouter } from './routes/agencies';
+import mcpRouter from './routes/mcp';
 import { validateUrlForSsrf } from './middleware/ssrf-protection';
 
 const app = express();
@@ -143,6 +144,7 @@ async function main() {
   app.use('/api/v1/scan-sessions',  scanSessionsRouter);
   app.use('/api/v1/agencies',       agenciesRouter);
   app.use('/api/v1/bureaus',        bureausRouter);
+  app.use('/mcp',                   mcpRouter);
 
   // Settings endpoint (simple key/value store)
   app.get('/api/v1/settings', async (_req, res) => {

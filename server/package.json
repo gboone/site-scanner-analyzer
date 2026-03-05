@@ -10,12 +10,13 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.0",
     "express": "^4.21.2",
     "ipaddr.js": "^2.2.0",
-    "node-fetch": "^3.3.2",
     "mysql2": "^3.9.0",
+    "node-fetch": "^3.3.2",
     "shared": "*",
     "typescript": "^5.4.5",
     "zod": "^3.24.1"
