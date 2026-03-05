@@ -235,7 +235,15 @@ export default function ExplorerView({ onNavigate }: Props) {
   const selectAllMatching = async () => {
     setSelectAllLoading(true);
     try {
-      const result = await api.getSites({ ...filters, page: 1, limit: 1000, sort, order }) as any;
+      const result = await api.getSites({
+        ...filters,
+        ...(agencyFilter ? { agency: agencyFilter } : {}),
+        ...(bureauFilter ? { bureau: bureauFilter } : {}),
+        page: 1,
+        limit: 1000,
+        sort,
+        order,
+      }) as any;
       const domains: string[] = (result?.data || []).map((r: any) => String(r.domain)).filter(Boolean);
       setSelectedDomains(new Set(domains));
     } finally {
