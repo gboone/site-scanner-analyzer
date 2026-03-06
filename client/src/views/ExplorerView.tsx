@@ -333,14 +333,14 @@ export default function ExplorerView({ onNavigate }: Props) {
             <button
               onClick={() => setGroupByFinalDomain((v) => !v)}
               aria-pressed={groupByFinalDomain}
-              title="Group sites by their final redirect destination"
+              title="Group sites by their final redirect target"
               className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${
                 groupByFinalDomain
                   ? 'bg-gov-blue text-white border-gov-blue'
                   : 'bg-white text-gov-blue border-blue-300 hover:bg-blue-50'
               }`}
             >
-              Group by destination
+              Group by redirect target
             </button>
             <button
               onClick={() => setImportOpen(true)}

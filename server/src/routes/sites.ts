@@ -42,7 +42,7 @@ router.get('/', async (req: Request, res: Response) => {
   if (req.query.https_enforced === 'true') conditions.push('https_enforced = 1');
   if (req.query.has_login === 'true') conditions.push('login_provider IS NOT NULL');
   if (req.query.no_redirect === 'true') conditions.push('(redirect = 0 OR redirect IS NULL)');
-  if (req.query.public_only === 'true') conditions.push('(redirect = 0 OR redirect IS NULL) AND live = 1 AND status_code = 200 AND (login_provider IS NULL OR login_provider = \'\')');
+  if (req.query.public_only === 'true') conditions.push('(redirect = 0 OR redirect IS NULL) AND live = 1 AND (status_code = 200 OR status_code IS NULL) AND (login_provider IS NULL OR login_provider = \'\')');
   if (req.query.agency) {
     conditions.push('agency = :agency');
     params.agency = req.query.agency;
