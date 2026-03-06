@@ -3,4 +3,5 @@ dist/
 .env
 *.db
 *.db-journal
+.claude/
 drizzle/

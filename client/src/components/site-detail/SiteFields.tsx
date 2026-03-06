@@ -46,6 +46,29 @@ function Val({ val, json }: { val: unknown; json?: boolean }) {
   return <span className="font-mono text-xs break-all">{String(val)}</span>;
 }
 
+function RedirectTargetRow({ site }: { site: Record<string, unknown> }) {
+  const isRedirect = site.redirect === 1 || site.redirect === true || site.redirect === '1';
+  if (!isRedirect || !site.url) return null;
+  let host: string | null = null;
+  try { host = new URL(String(site.url)).hostname; } catch { /* empty */ }
+  if (!host) return null;
+  return (
+    <div className="flex gap-2">
+      <dt className="w-32 flex-shrink-0 text-gray-500 text-xs pt-0.5">Redirects To</dt>
+      <dd className="flex-1 text-xs text-gray-900 min-w-0">
+        <a
+          href={String(site.url)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-gov-blue hover:underline break-all"
+        >
+          {host}
+        </a>
+      </dd>
+    </div>
+  );
+}
+
 const SECTIONS = [
   {
     title: 'Status',
@@ -221,6 +244,7 @@ export default function SiteFields({ site, domain }: SiteFieldsProps) {
                 </div>
               );
             })}
+            {section.title === 'Status' && <RedirectTargetRow site={site} />}
           </dl>
         </div>
       ))}

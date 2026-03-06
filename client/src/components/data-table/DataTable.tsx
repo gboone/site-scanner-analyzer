@@ -31,6 +31,8 @@ interface DataTableProps<T> {
   sortOrder?: 'asc' | 'desc';
   /** Called when the user clicks a column header to change the sort */
   onSortChange?: (column: string, order: 'asc' | 'desc') => void;
+  /** When set, inserts a group header row whenever this function returns a different value for adjacent rows */
+  groupBy?: (row: T) => string;
 }
 
 export function DataTable<T>({
@@ -49,6 +51,7 @@ export function DataTable<T>({
   sortColumn,
   sortOrder,
   onSortChange,
+  groupBy,
 }: DataTableProps<T>) {
   // Derive TanStack sorting state from controlled props so indicators render correctly.
   // manualSorting: true means TanStack never reorders rows — the server does that.
@@ -155,43 +158,74 @@ export function DataTable<T>({
               </td>
             </tr>
           ) : (
-            table.getRowModel().rows.map((row) => {
-              const key = getRowKey ? getRowKey(row.original) : String((row.original as any).domain);
-              const isSingleSelected = selectedKey === key;
-              const isBulkSelected = selectable && (selectedRows?.has(key) ?? false);
-              return (
-                <tr
-                  key={row.id}
-                  aria-selected={isBulkSelected || isSingleSelected || undefined}
-                  className={`border-b border-gray-100 cursor-pointer transition-colors ${
-                    isBulkSelected
-                      ? 'bg-blue-50 hover:bg-blue-100'
-                      : isSingleSelected
-                      ? 'bg-gov-blue-light'
-                      : 'hover:bg-gray-50'
-                  }`}
-                  onClick={() => onRowClick?.(row.original)}
-                >
-                  {selectable && (
-                    <td className="px-2 py-2 w-8 text-center">
-                      <input
-                        type="checkbox"
-                        checked={isBulkSelected}
-                        onChange={() => onToggleRow?.(key)}
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label={`${isBulkSelected ? 'Deselect' : 'Select'} ${key}`}
-                        className="cursor-pointer accent-gov-blue"
-                      />
-                    </td>
-                  )}
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-2 whitespace-nowrap max-w-xs truncate">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })
+            (() => {
+              let lastGroupKey: string | null = null;
+              const rows = table.getRowModel().rows;
+              // Pre-compute group sizes when groupBy is active
+              const groupSizes: Record<string, number> = {};
+              if (groupBy) {
+                for (const row of rows) {
+                  const gk = groupBy(row.original);
+                  groupSizes[gk] = (groupSizes[gk] ?? 0) + 1;
+                }
+              }
+              return rows.flatMap((row) => {
+                const key = getRowKey ? getRowKey(row.original) : String((row.original as any).domain);
+                const isSingleSelected = selectedKey === key;
+                const isBulkSelected = selectable && (selectedRows?.has(key) ?? false);
+                const elements: React.ReactNode[] = [];
+
+                if (groupBy) {
+                  const groupKey = groupBy(row.original);
+                  if (groupKey !== lastGroupKey) {
+                    lastGroupKey = groupKey;
+                    const count = groupSizes[groupKey] ?? 1;
+                    elements.push(
+                      <tr key={`group-${groupKey}`} className="bg-gray-100 border-b border-gray-300">
+                        <td colSpan={colSpanTotal} className="px-3 py-1.5">
+                          <span className="font-mono text-xs font-semibold text-gray-700 mr-2">{groupKey}</span>
+                          <span className="text-xs text-gray-400">{count} on this page</span>
+                        </td>
+                      </tr>
+                    );
+                  }
+                }
+
+                elements.push(
+                  <tr
+                    key={row.id}
+                    aria-selected={isBulkSelected || isSingleSelected || undefined}
+                    className={`border-b border-gray-100 cursor-pointer transition-colors ${
+                      isBulkSelected
+                        ? 'bg-blue-50 hover:bg-blue-100'
+                        : isSingleSelected
+                        ? 'bg-gov-blue-light'
+                        : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => onRowClick?.(row.original)}
+                  >
+                    {selectable && (
+                      <td className="px-2 py-2 w-8 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isBulkSelected}
+                          onChange={() => onToggleRow?.(key)}
+                          onClick={(e) => e.stopPropagation()}
+                          aria-label={`${isBulkSelected ? 'Deselect' : 'Select'} ${key}`}
+                          className="cursor-pointer accent-gov-blue"
+                        />
+                      </td>
+                    )}
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id} className="px-3 py-2 whitespace-nowrap max-w-xs truncate">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                );
+                return elements;
+              });
+            })()
           )}
         </tbody>
       </table>

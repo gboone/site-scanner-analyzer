@@ -37,7 +37,7 @@ function StatTile({ label, value, sub, good }: { label: string; value: string | 
   );
 }
 
-type SortKey = 'domain' | 'live' | 'https' | 'hsts' | 'uswds' | 'dap' | 'sitemap' | 'cms' | 'scan_date';
+type SortKey = 'domain' | 'live' | 'redirect' | 'https' | 'hsts' | 'uswds' | 'dap' | 'sitemap' | 'cms' | 'scan_date';
 
 export default function MultiSiteReportView({ onNavigate }: Props) {
   const { reportConfig, clearReport } = useUIStore();
@@ -96,6 +96,7 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
       switch (sortKey) {
         case 'domain':   av = a.domain;           bv = b.domain;           break;
         case 'live':     av = bool(a.live) ? 1 : 0;  bv = bool(b.live) ? 1 : 0; break;
+        case 'redirect': av = bool(a.redirect) ? 1 : 0; bv = bool(b.redirect) ? 1 : 0; break;
         case 'https':    av = bool(a.https_enforced) ? 1 : 0; bv = bool(b.https_enforced) ? 1 : 0; break;
         case 'hsts':     av = bool(a.hsts) ? 1 : 0; bv = bool(b.hsts) ? 1 : 0; break;
         case 'uswds':    av = Number(a.uswds_count ?? 0); bv = Number(b.uswds_count ?? 0); break;
@@ -329,6 +330,7 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
                   <tr>
                     <Th col="domain">Domain</Th>
                     <Th col="live">Live</Th>
+                    <Th col="redirect">Redirects</Th>
                     <Th col="https">HTTPS</Th>
                     <Th col="hsts">HSTS</Th>
                     <Th col="uswds">USWDS</Th>
@@ -352,6 +354,17 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
                         {String(site.domain)}
                       </td>
                       <td className="px-3 py-2"><BoolCell v={site.live} /></td>
+                      <td className="px-3 py-2">
+                        {bool(site.redirect) ? (() => {
+                          let host: string | null = null;
+                          try { if (site.url) host = new URL(String(site.url)).hostname; } catch { /* empty */ }
+                          return (
+                            <span className="badge badge-gray text-xs" title={host ?? undefined}>
+                              → {host ?? '?'}
+                            </span>
+                          );
+                        })() : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-3 py-2"><BoolCell v={site.https_enforced} /></td>
                       <td className="px-3 py-2"><BoolCell v={site.hsts} /></td>
                       <td className="px-3 py-2 text-xs font-mono">
@@ -371,7 +384,7 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
                   ))}
                   {sites.length === 0 && allLoaded && (
                     <tr>
-                      <td colSpan={9} className="px-3 py-8 text-center text-gray-400 text-sm">
+                      <td colSpan={10} className="px-3 py-8 text-center text-gray-400 text-sm">
                         No site data available.
                       </td>
                     </tr>

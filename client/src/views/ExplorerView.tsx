@@ -139,6 +139,7 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [tableInstance, setTableInstance] = React.useState<Table<any> | null>(null);
   const [importOpen, setImportOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [groupByFinalDomain, setGroupByFinalDomain] = React.useState(false);
 
   // Bulk selection state
   const [selectedDomains, setSelectedDomains] = React.useState<Set<string>>(new Set());
@@ -153,7 +154,10 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [bureauFilter, setBureauFilter] = React.useState('');
 
   const queryParams = {
-    page, limit: 25, sort, order, ...filters,
+    page, limit: 25,
+    sort: groupByFinalDomain ? 'final_domain' : sort,
+    order: groupByFinalDomain ? 'asc' : order,
+    ...filters,
     ...(agencyFilter ? { agency: agencyFilter } : {}),
     ...(bureauFilter ? { bureau: bureauFilter } : {}),
   };
@@ -327,6 +331,18 @@ export default function ExplorerView({ onNavigate }: Props) {
           <FilterChips onFilter={handleFilter} />
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setGroupByFinalDomain((v) => !v)}
+              aria-pressed={groupByFinalDomain}
+              title="Group sites by their final redirect target"
+              className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${
+                groupByFinalDomain
+                  ? 'bg-gov-blue text-white border-gov-blue'
+                  : 'bg-white text-gov-blue border-blue-300 hover:bg-blue-50'
+              }`}
+            >
+              Group by redirect target
+            </button>
+            <button
               onClick={() => setImportOpen(true)}
               className="btn-secondary text-xs py-0.5 px-2"
               title="Add domains by pasting or dropping a text file"
@@ -499,9 +515,10 @@ export default function ExplorerView({ onNavigate }: Props) {
           selectedRows={selectedDomains}
           onToggleRow={toggleRow}
           onToggleAll={toggleAll}
-          sortColumn={sort}
-          sortOrder={order as 'asc' | 'desc'}
-          onSortChange={handleSortChange}
+          sortColumn={groupByFinalDomain ? 'final_domain' : sort}
+          sortOrder={groupByFinalDomain ? 'asc' : (order as 'asc' | 'desc')}
+          onSortChange={groupByFinalDomain ? undefined : handleSortChange}
+          groupBy={groupByFinalDomain ? (row: any) => String(row.final_domain ?? row.domain) : undefined}
         />
 
         {data && (

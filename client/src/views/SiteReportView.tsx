@@ -22,7 +22,7 @@ function StatTile({ label, value, sub, good }: { label: string; value: string | 
 }
 
 export default function SiteReportView({ onNavigate }: Props) {
-  const { selectedDomain } = useUIStore();
+  const { selectedDomain, openDetail } = useUIStore();
   const domain = selectedDomain;
   const { data, isLoading } = useSite(domain);
 
@@ -64,8 +64,15 @@ export default function SiteReportView({ onNavigate }: Props) {
 
   const site = data.site as Record<string, unknown>;
   const scans = (data.scan_history ?? []) as any[];
+  const redirectSources = ((data as any).redirect_sources ?? []) as string[];
 
   const bool = (v: unknown) => v === 1 || v === true || v === '1';
+
+  // Derive the final hostname for redirect display
+  const redirectTargetHost = (() => {
+    if (!bool(site.redirect) || !site.url) return null;
+    try { return new URL(String(site.url)).hostname; } catch { return null; }
+  })();
 
   return (
     <div className="flex flex-col h-full overflow-auto print:overflow-visible">
@@ -97,6 +104,50 @@ export default function SiteReportView({ onNavigate }: Props) {
       </div>
 
       <div className="flex-1 px-8 py-6 space-y-8 max-w-5xl mx-auto w-full">
+
+        {/* Redirect banner — shown when this domain redirects to another */}
+        {redirectTargetHost && (
+          <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+            <span className="text-amber-600 font-medium">↪ This domain redirects to:</span>
+            <button
+              onClick={() => openDetail(redirectTargetHost)}
+              className="font-mono text-gov-blue hover:underline"
+            >
+              {redirectTargetHost}
+            </button>
+            {site.url ? (
+              <a
+                href={String(site.url)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gray-400 hover:text-gray-600 text-xs ml-1"
+              >
+                ↗
+              </a>
+            ) : null}
+          </div>
+        )}
+
+        {/* Redirect sources — shown when other domains redirect to this one */}
+        {redirectSources.length > 0 && (
+          <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+            <p className="text-blue-700 font-medium mb-2">
+              {redirectSources.length} domain{redirectSources.length !== 1 ? 's' : ''} redirect to this domain:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {redirectSources.map((src) => (
+                <button
+                  key={src}
+                  onClick={() => openDetail(src)}
+                  className="font-mono text-xs text-gov-blue bg-white border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-100 transition-colors"
+                >
+                  {src}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Key metric tiles */}
         <section aria-label="Key metrics">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Key Metrics</h2>
