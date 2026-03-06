@@ -7,6 +7,7 @@ import { useScanQueue } from '../../contexts/ScanQueueContext';
 interface ShellProps {
   currentView: View;
   onNavigate: (view: View) => void;
+  onCopyLink: () => Promise<boolean>;
   children: React.ReactNode;
 }
 
@@ -17,10 +18,19 @@ const NAV_ITEMS: Array<{ id: View; label: string; icon: string }> = [
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ];
 
-export default function Shell({ currentView, onNavigate, children }: ShellProps) {
+export default function Shell({ currentView, onNavigate, onCopyLink, children }: ShellProps) {
   const importMutation = useImport();
   const [importStatus, setImportStatus] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
   const { scan, stopScan } = useScanQueue();
+
+  const handleCopyLink = React.useCallback(async () => {
+    const ok = await onCopyLink();
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [onCopyLink]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { 'application/json': ['.json'] },
@@ -67,9 +77,19 @@ export default function Shell({ currentView, onNavigate, children }: ShellProps)
 
       {/* Sidebar */}
       <aside className="w-48 flex-shrink-0 bg-gov-blue-dark text-white flex flex-col" aria-label="Main navigation">
-        <div className="p-4 border-b border-white/20">
-          <div className="font-bold text-sm leading-tight">GSA Site Scanner</div>
-          <div className="text-white/60 text-xs">Analyzer</div>
+        <div className="p-4 border-b border-white/20 flex items-start justify-between gap-1">
+          <div>
+            <div className="font-bold text-sm leading-tight">GSA Site Scanner</div>
+            <div className="text-white/60 text-xs">Analyzer</div>
+          </div>
+          <button
+            onClick={handleCopyLink}
+            title={copied ? 'Copied!' : 'Copy shareable link'}
+            aria-label={copied ? 'Link copied' : 'Copy shareable link'}
+            className="flex-shrink-0 text-white/40 hover:text-white/80 text-base mt-0.5 transition-colors"
+          >
+            {copied ? '✓' : '🔗'}
+          </button>
         </div>
         <nav className="flex-1 py-2" aria-label="Views">
           {NAV_ITEMS.map((item) => (

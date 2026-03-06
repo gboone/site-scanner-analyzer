@@ -4,6 +4,7 @@ import { useSite } from '../../hooks/useSites';
 import SiteFields from './SiteFields';
 import ScanHistory from './ScanHistory';
 import ResearchPanel from '../briefings/ResearchPanel';
+import type { View } from '../../App';
 
 const FOCUS_SELECTORS =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -42,7 +43,11 @@ function useFocusTrap(ref: React.RefObject<HTMLElement | null>, active: boolean)
 const TABS = ['overview', 'scans', 'research'] as const;
 type TabId = typeof TABS[number];
 
-export default function SiteDetail() {
+interface Props {
+  onNavigate?: (view: View) => void;
+}
+
+export default function SiteDetail({ onNavigate }: Props = {}) {
   const { selectedDomain, detailPanelOpen, closeDetail, activeTab, setActiveTab } = useUIStore();
   const { data, isLoading } = useSite(selectedDomain);
   const panelRef = React.useRef<HTMLDivElement>(null);
@@ -98,6 +103,15 @@ export default function SiteDetail() {
             >
               Open <span aria-hidden="true">↗</span>
             </a>
+          )}
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('site-report')}
+              className="text-xs text-gov-blue hover:underline"
+              title="Open full-page site report"
+            >
+              Full report <span aria-hidden="true">↗</span>
+            </button>
           )}
           <button
             onClick={closeDetail}

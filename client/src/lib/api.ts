@@ -22,10 +22,11 @@ export const api = {
   getSite: (domain: string) => request(`/sites/${encodeURIComponent(domain)}`),
   updateSite: (domain: string, data: Record<string, unknown>) =>
     request(`/sites/${encodeURIComponent(domain)}`, { method: 'PUT', body: JSON.stringify(data) }),
-  getStats: (filter?: { agency?: string; bureau?: string }) => {
+  getStats: (filter?: { agency?: string; bureau?: string; domains?: string[] }) => {
     const q = new URLSearchParams();
     if (filter?.agency) q.set('agency', filter.agency);
     if (filter?.bureau) q.set('bureau', filter.bureau);
+    if (filter?.domains?.length) q.set('domains', filter.domains.join(','));
     const qs = q.toString();
     return request(`/stats${qs ? `?${qs}` : ''}`);
   },

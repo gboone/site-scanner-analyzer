@@ -4,6 +4,8 @@ import { FOCUS_SEARCH_EVENT } from '../../App';
 
 const CHIPS = [
   { key: 'live', value: 'true', label: 'Live', color: 'green' },
+  { key: 'public_only', value: 'true', label: 'Public', color: 'green' },
+  { key: 'no_redirect', value: 'true', label: 'Hide Redirects', color: 'gray' },
   { key: 'has_uswds', value: 'true', label: 'Has USWDS', color: 'blue' },
   { key: 'no_sitemap', value: 'true', label: 'No Sitemap', color: 'yellow' },
   { key: 'has_dap', value: 'true', label: 'Has DAP', color: 'blue' },

@@ -280,7 +280,7 @@ export async function initDb(): Promise<void> {
       id INT AUTO_INCREMENT PRIMARY KEY,
       started_at TEXT NOT NULL,
       completed_at TEXT,
-      status TEXT NOT NULL DEFAULT 'running',
+      status VARCHAR(50) NOT NULL DEFAULT 'running',
       total_domains INTEGER NOT NULL DEFAULT 0,
       completed_count INTEGER NOT NULL DEFAULT 0,
       failed_count INTEGER NOT NULL DEFAULT 0,

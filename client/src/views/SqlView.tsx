@@ -6,13 +6,18 @@ import { useSqlQuery, getQueryHistory, addToHistory } from '../hooks/useSqlQuery
 import { useUIStore } from '../store/uiStore';
 import { SAMPLE_QUERIES } from '../lib/sampleQueries';
 import type { QueryResult } from 'shared';
+import type { View } from '../App';
 
-export default function SqlView() {
+interface Props {
+  onNavigate: (view: View) => void;
+}
+
+export default function SqlView({ onNavigate }: Props) {
   const [sql, setSql] = React.useState(SAMPLE_QUERIES[0].sql);
   const [queryResult, setQueryResult] = React.useState<QueryResult | null>(null);
   const [history, setHistory] = React.useState<string[]>(getQueryHistory);
   const [showSamples, setShowSamples] = React.useState(false);
-  const { openDetail } = useUIStore();
+  const { openDetail, setReport } = useUIStore();
   const mutation = useSqlQuery();
 
   const handleRun = async () => {
@@ -24,6 +29,18 @@ export default function SqlView() {
     } catch {
       // error shown from mutation.error
     }
+  };
+
+  const hasDomainColumn = !!queryResult?.rows.length && 'domain' in queryResult.rows[0];
+
+  const generateReport = () => {
+    if (!queryResult || !hasDomainColumn) return;
+    const domains = queryResult.rows
+      .map((r) => String(r.domain))
+      .filter(Boolean)
+      .slice(0, 500);
+    setReport({ scope: 'sql', domains, sqlQuery: sql, createdAt: new Date().toISOString() });
+    onNavigate('dashboard');
   };
 
   // Build columns dynamically from first result row
@@ -119,7 +136,18 @@ export default function SqlView() {
           <>
             <div className="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
               <span>{queryResult.count.toLocaleString()} row{queryResult.count !== 1 ? 's' : ''}</span>
-              <span>{queryResult.duration_ms}ms</span>
+              <div className="flex items-center gap-3">
+                {hasDomainColumn && (
+                  <button
+                    onClick={generateReport}
+                    className="btn-primary text-xs py-0.5 px-2"
+                    title="Open Dashboard aggregate report scoped to these domains"
+                  >
+                    Generate report →
+                  </button>
+                )}
+                <span>{queryResult.duration_ms}ms</span>
+              </div>
             </div>
             <DataTable
               data={queryResult.rows}

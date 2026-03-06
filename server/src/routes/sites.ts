@@ -17,9 +17,12 @@ router.get('/', async (req: Request, res: Response) => {
     'domain', 'agency', 'bureau', 'live', 'status_code', 'uswds_count',
     'dap', 'pageviews', 'sitemap_xml_detected', 'https_enforced', 'scan_date',
     'sitemap_xml_count', 'robots_txt_detected', 'imported_at', 'updated_at',
-    'cms', 'title',
+    'cms', 'title', 'final_domain',
   ]);
-  const safeSort = SORTABLE.has(sort) ? sort : 'domain';
+  const rawSort = SORTABLE.has(sort) ? sort : 'domain';
+  // final_domain is a computed alias — must reference the expression in ORDER BY
+  const FINAL_DOMAIN_SQL = `CASE WHEN redirect = 1 AND url IS NOT NULL AND url != '' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(url, '/', 3), '//', -1) ELSE domain END`;
+  const safeSort = rawSort === 'final_domain' ? FINAL_DOMAIN_SQL : rawSort;
 
   // Build filter clauses
   const conditions: string[] = [];
@@ -38,6 +41,8 @@ router.get('/', async (req: Request, res: Response) => {
   if (req.query.has_dap === 'true') conditions.push('dap = 1');
   if (req.query.https_enforced === 'true') conditions.push('https_enforced = 1');
   if (req.query.has_login === 'true') conditions.push('login_provider IS NOT NULL');
+  if (req.query.no_redirect === 'true') conditions.push('(redirect = 0 OR redirect IS NULL)');
+  if (req.query.public_only === 'true') conditions.push('(redirect = 0 OR redirect IS NULL) AND live = 1 AND status_code = 200 AND (login_provider IS NULL OR login_provider = \'\')');
   if (req.query.agency) {
     conditions.push('agency = :agency');
     params.agency = req.query.agency;
@@ -55,7 +60,7 @@ router.get('/', async (req: Request, res: Response) => {
     const total = Number(countRows[0].count);
 
     const rows = await query(
-      `SELECT * FROM sites ${where} ORDER BY ${safeSort} ${order} LIMIT :limit OFFSET :offset`,
+      `SELECT *, ${FINAL_DOMAIN_SQL} AS final_domain FROM sites ${where} ORDER BY ${safeSort} ${order} LIMIT :limit OFFSET :offset`,
       { ...params, limit, offset }
     );
 
@@ -82,6 +87,15 @@ router.get('/:domain', async (req: Request, res: Response) => {
     return;
   }
 
+  // ETag based on domain + updated_at — lets browsers and CDNs skip re-fetching unchanged records
+  const etag = `"${domain}-${(site as any).updated_at || 'nodate'}"`;
+  res.set('ETag', etag);
+  res.set('Cache-Control', 'private, max-age=300');
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).end();
+    return;
+  }
+
   const scanHistory = await query(
     'SELECT * FROM scan_history WHERE domain = ? ORDER BY scanned_at DESC LIMIT 20',
     [domain]
@@ -92,7 +106,14 @@ router.get('/:domain', async (req: Request, res: Response) => {
     [domain]
   );
 
-  res.json({ site, scan_history: scanHistory, briefings });
+  // Domains in the DB that redirect to this domain
+  const redirectSourceRows = await query<{ domain: string }>(
+    `SELECT domain FROM sites WHERE redirect = 1 AND SUBSTRING_INDEX(SUBSTRING_INDEX(url, '/', 3), '//', -1) = ? ORDER BY domain`,
+    [domain]
+  );
+  const redirect_sources = redirectSourceRows.map((r) => r.domain);
+
+  res.json({ site, scan_history: scanHistory, briefings, redirect_sources });
 });
 
 // PUT /api/v1/sites/:domain - update site record

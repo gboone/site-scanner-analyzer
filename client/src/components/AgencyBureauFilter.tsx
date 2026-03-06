@@ -82,13 +82,17 @@ interface Props {
   bureau: string;
   onAgencyChange: (v: string) => void;
   onBureauChange: (v: string) => void;
+  /** Called when the user selects a suggestion from the agency dropdown (fires immediately, before Apply). */
+  onAgencySelect?: (v: string) => void;
+  /** Called when the user selects a suggestion from the bureau dropdown (fires immediately, before Apply). */
+  onBureauSelect?: (v: string) => void;
   onApply: () => void;
   onClear: () => void;
   hasFilter: boolean;
 }
 
 export default function AgencyBureauFilter({
-  agency, bureau, onAgencyChange, onBureauChange, onApply, onClear, hasFilter,
+  agency, bureau, onAgencyChange, onBureauChange, onAgencySelect, onBureauSelect, onApply, onClear, hasFilter,
 }: Props) {
   const [agencySuggestions, setAgencySuggestions] = React.useState<Suggestion[]>([]);
   const [bureauSuggestions, setBureauSuggestions] = React.useState<Suggestion[]>([]);
@@ -141,6 +145,7 @@ export default function AgencyBureauFilter({
 
   const handleAgencySelect = (v: string) => {
     onAgencyChange(v);
+    onAgencySelect?.(v);
     setShowAgencyDrop(false);
     setAgencySuggestions([]);
     setAgencyActiveIndex(-1);
@@ -150,6 +155,7 @@ export default function AgencyBureauFilter({
 
   const handleBureauSelect = (v: string) => {
     onBureauChange(v);
+    onBureauSelect?.(v);
     setShowBureauDrop(false);
     setBureauSuggestions([]);
     setBureauActiveIndex(-1);

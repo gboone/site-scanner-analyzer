@@ -15,6 +15,7 @@ import gsaRouter from './routes/gsa';
 import briefingsRouter from './routes/briefings';
 import scanSessionsRouter from './routes/scan-sessions';
 import { agenciesRouter, bureausRouter } from './routes/agencies';
+import mcpRouter from './routes/mcp';
 import { validateUrlForSsrf } from './middleware/ssrf-protection';
 
 const app = express();
@@ -40,9 +41,31 @@ async function main() {
   console.log(`✓ Server listening at http://localhost:${config.port}`);
 
   // ---------------------------------------------------------------------------
-  // 2. Initialize DB — runs after server is already accepting health checks
+  // 2. Initialize DB — runs after server is already accepting health checks.
+  //    Retries on ECONNREFUSED / ECONNRESET because VIP's ProxySQL sidecar may
+  //    not be ready the instant the Node process starts.  We wait up to ~30 s
+  //    (10 attempts × 3 s) before giving up and crashing.
   // ---------------------------------------------------------------------------
-  await initDb();
+  {
+    const CONNECTION_ERRORS = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH']);
+    const MAX_ATTEMPTS = 10;
+    const RETRY_DELAY_MS = 3000;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        await initDb();
+        break; // success — exit the retry loop
+      } catch (err: any) {
+        const isConnErr = CONNECTION_ERRORS.has(err.code) || err.errno === -111;
+        if (!isConnErr || attempt === MAX_ATTEMPTS) throw err;
+        console.log(
+          `  DB not ready yet (${err.code ?? err.errno}, attempt ${attempt}/${MAX_ATTEMPTS})` +
+          ` — retrying in ${RETRY_DELAY_MS / 1000} s…`
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      }
+    }
+  }
 
   // Load any settings previously saved via the UI into the live config object.
   // This ensures keys saved in a previous session are available without a .env edit.
@@ -121,6 +144,7 @@ async function main() {
   app.use('/api/v1/scan-sessions',  scanSessionsRouter);
   app.use('/api/v1/agencies',       agenciesRouter);
   app.use('/api/v1/bureaus',        bureausRouter);
+  app.use('/mcp',                   mcpRouter);
 
   // Settings endpoint (simple key/value store)
   app.get('/api/v1/settings', async (_req, res) => {
