@@ -31,6 +31,9 @@ async function main() {
   app.get('/cache-healthcheck', (_req, res) => {
     res.json({ status: 'ok' });
   });
+  app.get('/healthz', (_req, res) => {
+    res.json({ status: 'ok' });
+  });
 
   // Start accepting connections NOW, before initDb() runs. Express registers
   // middleware/routes in order at request time, so everything registered below
@@ -86,30 +89,6 @@ async function main() {
       (config as any)[configKey] = row.value;
       process.env[row.key] = row.value;
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // 3. HTTP Basic Auth (optional) — set AUTH_PASSWORD to enable; omit in dev
-  // ---------------------------------------------------------------------------
-  if (process.env.AUTH_PASSWORD) {
-    const authUser = process.env.AUTH_USER ?? 'admin';
-    const authPass = process.env.AUTH_PASSWORD;
-    app.use((req, res, next) => {
-      const header = req.headers.authorization ?? '';
-      if (header.startsWith('Basic ')) {
-        const decoded = Buffer.from(header.slice(6), 'base64').toString();
-        const colon   = decoded.indexOf(':');
-        if (
-          colon > 0 &&
-          decoded.slice(0, colon)  === authUser &&
-          decoded.slice(colon + 1) === authPass
-        ) {
-          return next();
-        }
-      }
-      res.setHeader('WWW-Authenticate', 'Basic realm="Site Scanner", charset="UTF-8"');
-      res.status(401).send('Unauthorized');
-    });
   }
 
   // ---------------------------------------------------------------------------
@@ -212,7 +191,88 @@ async function main() {
   });
 
   // ---------------------------------------------------------------------------
-  // 5. Static SPA — production only, MUST come after all API routes
+  // 5. Schema — machine-readable description for Glean agent tool definitions
+  // ---------------------------------------------------------------------------
+  app.get('/api/v1/schema', (_req, res) => {
+    res.json({
+      info: {
+        title: 'Site Scanner Analyzer API',
+        description: 'Federal government website scan data. Use /api/v1/report to retrieve public website data for any agency or bureau by name.',
+        version: '1.0.0',
+      },
+      endpoints: {
+        'GET /healthz': {
+          description: 'Liveness check.',
+          response: { status: 'ok' },
+        },
+        'GET /api/v1/report': {
+          description: 'Resolve an agency or bureau name (exact or shorthand) and return its public website data. Returns disambiguation candidates when the query is ambiguous.',
+          parameters: {
+            q: { type: 'string', required: true, description: "Agency or bureau name, exact or partial (e.g. 'HHS', 'NOAA', 'Centers for Medicare and Medicaid Services')" },
+          },
+          responses: {
+            '200_resolved': {
+              needs_disambiguation: false,
+              matched_as: "'agency' | 'bureau'",
+              matched_name: 'string — canonical name as stored in the database',
+              parent_agency: 'string | null — populated when matched_as is bureau',
+              total_public_sites: 'number',
+              summary: {
+                total_public_sites: 'number',
+                live_count: 'number — sites returning HTTP 200',
+                uswds_count: 'number — sites with U.S. Web Design System detected',
+                dap_count: 'number — sites with Digital Analytics Program tag',
+                https_enforced_count: 'number — sites enforcing HTTPS',
+                sitemap_detected_count: 'number — sites with sitemap.xml',
+              },
+              sites: [{
+                domain: 'string',
+                url: 'string | null',
+                title: 'string | null',
+                description: 'string | null',
+                cms: 'string | null — detected content management system',
+                uswds_count: 'number | null — USWDS signal count (higher = more confident)',
+                uswds_version: 'number | null',
+                uswds_semantic_version: 'string | null',
+                dap: '0 | 1 | null',
+                dap_version: 'string | null',
+                https_enforced: '0 | 1 | null',
+                sitemap_xml_detected: '0 | 1 | null',
+                security_header_csp: 'string | null — Content-Security-Policy header value',
+                updated_at: 'string — ISO 8601 timestamp of last scan',
+              }],
+            },
+            '200_disambiguation': {
+              needs_disambiguation: true,
+              query: 'string',
+              candidates: [{
+                type: "'agency' | 'bureau'",
+                name: 'string',
+                parent_agency: 'string | null',
+                site_count: 'number',
+                score: 'number',
+              }],
+            },
+            '400': { error: 'string — validation message' },
+            '404': { error: 'string', query: 'string' },
+            '500': { error: 'string' },
+          },
+        },
+      },
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 6. Global JSON error handler — catches any unhandled next(err) or throws
+  // ---------------------------------------------------------------------------
+  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[unhandled error]', err?.message ?? err, err?.stack);
+    const status = typeof err?.status === 'number' ? err.status : 500;
+    res.status(status).json({ error: err?.message ?? 'Internal server error' });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 7. Static SPA — production only, MUST come after all API routes
   // ---------------------------------------------------------------------------
   if (process.env.NODE_ENV === 'production') {
     const clientDist = path.join(__dirname, '../../client/dist');
