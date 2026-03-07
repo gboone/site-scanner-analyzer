@@ -3,6 +3,31 @@ import { query, execute } from '../db';
 
 const router = Router();
 
+// ---------------------------------------------------------------------------
+// Bot-challenge detection
+// Cloudflare and similar WAFs return non-2xx responses with recognisable page
+// titles when they intercept a headless HTTP request. Writing these results to
+// the sites table would mark genuine public sites as offline. Instead we record
+// the scan_history entry for auditability but leave the sites row untouched.
+// ---------------------------------------------------------------------------
+const BOT_CHALLENGE_TITLE_PATTERNS = [
+  'checking your browser',
+  'just a moment',           // Cloudflare JS-challenge variant
+  'attention required',      // Cloudflare error pages
+  'please wait while we check',
+  'ddos protection',
+  'security check',
+];
+
+function isBotChallenge(scanResult: any): boolean {
+  const hops = scanResult?.redirect_chain?.hops;
+  if (!Array.isArray(hops) || hops.length === 0) return false;
+  const finalStatus: number = hops[hops.length - 1]?.status_code ?? 0;
+  if (finalStatus < 400) return false;
+  const title: string = (scanResult?.tech_stack?.title ?? '').toLowerCase();
+  return BOT_CHALLENGE_TITLE_PATTERNS.some(p => title.includes(p));
+}
+
 // GET /api/v1/scans/:domain - get scan history
 router.get('/:domain', async (req: Request, res: Response) => {
   const domain = decodeURIComponent(String(req.params.domain));
@@ -150,6 +175,14 @@ router.post('/', async (req: Request, res: Response) => {
     if (r.filesize !== undefined) updates.robots_txt_filesize = r.filesize;
     if (r.crawl_delay !== undefined) updates.robots_txt_crawl_delay = r.crawl_delay;
     if (r.sitemap_locations !== undefined) updates.robots_txt_sitemap_locations = JSON.stringify(r.sitemap_locations);
+  }
+
+  // If the scan hit a bot-challenge wall, preserve the existing sites row.
+  // The scan_history entry above is already committed, so there's an audit trail.
+  if (isBotChallenge(scan_result)) {
+    console.warn(`[scans] Bot challenge detected for ${domain} — skipping sites table update`);
+    res.json({ scan_id: scanId, applied: true, bot_challenge: true });
+    return;
   }
 
   if (scan_result.redirect_chain) {
