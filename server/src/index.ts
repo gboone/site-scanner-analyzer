@@ -15,6 +15,7 @@ import gsaRouter from './routes/gsa';
 import briefingsRouter from './routes/briefings';
 import scanSessionsRouter from './routes/scan-sessions';
 import { agenciesRouter, bureausRouter } from './routes/agencies';
+import reportRouter from './routes/report';
 import mcpRouter from './routes/mcp';
 import { validateUrlForSsrf } from './middleware/ssrf-protection';
 
@@ -144,6 +145,7 @@ async function main() {
   app.use('/api/v1/scan-sessions',  scanSessionsRouter);
   app.use('/api/v1/agencies',       agenciesRouter);
   app.use('/api/v1/bureaus',        bureausRouter);
+  app.use('/api/v1/report',         reportRouter);
   app.use('/mcp',                   mcpRouter);
 
   // Settings endpoint (simple key/value store)
