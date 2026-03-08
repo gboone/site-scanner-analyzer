@@ -31,6 +31,41 @@ const SORTABLE = new Set([
   'dap', 'sitemap_xml_detected', 'https_enforced', 'scan_date', 'cms', 'title',
 ]);
 
+// Computed column for redirect final destination — mirrors routes/sites.ts.
+const FINAL_DOMAIN_SQL =
+  `CASE WHEN redirect = 1 AND url IS NOT NULL AND url != '' ` +
+  `THEN SUBSTRING_INDEX(SUBSTRING_INDEX(url, '/', 3), '//', -1) ELSE domain END`;
+
+/**
+ * "Public" filter condition — mirrors the public_only chip in ExplorerView.
+ *
+ * A site is considered genuinely public when it:
+ *   • is not a redirect (or redirect field is NULL)
+ *   • is live with HTTP 200 (or NULL status, e.g. GSA-imported records)
+ *   • has a page title that doesn't indicate a login screen, default server
+ *     page, webmail portal, or other gated/non-public landing page
+ */
+const PUBLIC_ONLY_CONDITION =
+  `(redirect = 0 OR redirect IS NULL) AND live = 1 ` +
+  `AND (status_code = 200 OR status_code IS NULL) ` +
+  `AND (title IS NULL OR title = '' OR (` +
+    `title NOT LIKE '%login%' AND ` +
+    `title NOT LIKE '%log in%' AND ` +
+    `title NOT LIKE '%sign in%' AND ` +
+    `title NOT LIKE '%sign-in%' AND ` +
+    `title NOT LIKE '%request rejected%' AND ` +
+    `title NOT LIKE '%access denied%' AND ` +
+    `title NOT LIKE '%unauthorized%' AND ` +
+    `title NOT LIKE '%default website%' AND ` +
+    `title NOT LIKE '%welcome to iis%' AND ` +
+    `title NOT LIKE '%welcome to default%' AND ` +
+    `title NOT LIKE '%outlook%' AND ` +
+    `title NOT LIKE '%webmail%' AND ` +
+    `title NOT LIKE '%forbidden%' AND ` +
+    `title NOT LIKE '%it security%' AND ` +
+    `title NOT LIKE '%page not found%'` +
+  `))`;
+
 // ---------------------------------------------------------------------------
 // Zod schemas — defined as plain objects (ZodRawShape) and passed as `any`
 // to work around TS2589 in McpServer.tool() generic resolution.
@@ -81,6 +116,23 @@ const runQuerySchema = {
 
 const getScanHistorySchema = {
   domain: z.string().describe('Domain name, e.g. "va.gov"'),
+};
+
+const getPublicSitesSchema = {
+  agency: z.string().describe(
+    'Agency name (exact match), e.g. "General Services Administration". ' +
+    'Use list_agencies to discover exact names.'
+  ),
+  bureau: z.string().optional().describe(
+    'Optionally scope to a bureau or office within the agency (exact match). ' +
+    'Use list_bureaus to discover exact names.'
+  ),
+  page:   z.number().int().min(1).default(1).describe('Page number (1-based)'),
+  limit:  z.number().int().min(1).max(200).default(50).describe('Results per page (max 200)'),
+  sort:   z.string().optional().describe(
+    'Column to sort by: domain, title, cms, uswds_count, dap, scan_date, https_enforced, sitemap_xml_detected, pageviews'
+  ),
+  order:  z.enum(['asc', 'desc']).default('asc').describe('Sort direction'),
 };
 
 // ---------------------------------------------------------------------------
@@ -134,7 +186,7 @@ function buildStatsFilter(args: { agency?: string; bureau?: string; domains?: st
 // Tool registration
 // ---------------------------------------------------------------------------
 
-/** Register all 7 tools on the given McpServer instance. */
+/** Register all 8 tools on the given McpServer instance. */
 export function registerTools(server: McpServer): void {
 
   // ── search_sites ───────────────────────────────────────────────────────────
@@ -194,6 +246,69 @@ export function registerTools(server: McpServer): void {
           return { content: [{ type: 'text' as const, text: `No site found for domain: ${domain}` }], isError: true };
         }
         return mcpResult({ site: siteRows[0], recent_scans: history });
+      } catch (err: any) {
+        return { content: [{ type: 'text' as const, text: `Error: ${err.message}` }], isError: true };
+      }
+    }
+  );
+
+  // ── get_public_sites ───────────────────────────────────────────────────────
+  server.tool(
+    'get_public_sites',
+    'Return all database fields for genuinely public-facing federal websites owned by a given agency. ' +
+    '"Public" means: not a redirect, live with HTTP 200 (or NULL status for imported records), and no ' +
+    'title pattern indicating a login screen, default server page, webmail portal, or access-denied page. ' +
+    'This mirrors the "Public" filter chip in the Explorer view. Results are paginated (default 50, max 200).',
+    getPublicSitesSchema as any,
+    async (args: any) => {
+      try {
+        const page:  number = args.page  ?? 1;
+        const limit: number = args.limit ?? 50;
+        const offset = (page - 1) * limit;
+
+        const PUBLIC_SITES_SORTABLE = new Set([
+          'domain', 'title', 'cms', 'uswds_count', 'dap', 'scan_date',
+          'https_enforced', 'sitemap_xml_detected', 'pageviews',
+        ]);
+        const sort:  string = PUBLIC_SITES_SORTABLE.has(String(args.sort ?? '')) ? String(args.sort) : 'domain';
+        const order: string = args.order === 'desc' ? 'DESC' : 'ASC';
+
+        const conditions: string[] = [PUBLIC_ONLY_CONDITION];
+        const params: Record<string, unknown> = {};
+
+        // Agency is required for this tool.
+        conditions.push('agency = :agency');
+        params.agency = args.agency;
+
+        if (args.bureau) {
+          conditions.push('bureau = :bureau');
+          params.bureau = args.bureau;
+        }
+
+        const where = `WHERE ${conditions.join(' AND ')}`;
+
+        const [countRows, rows] = await Promise.all([
+          query<{ count: string }>(`SELECT COUNT(*) as count FROM sites ${where}`, params),
+          query(
+            `SELECT *, ${FINAL_DOMAIN_SQL} AS final_domain FROM sites ${where} ORDER BY ${sort} ${order} LIMIT :limit OFFSET :offset`,
+            { ...params, limit, offset }
+          ),
+        ]);
+
+        const total = Number(countRows[0].count);
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              filter:  { agency: args.agency, bureau: args.bureau ?? null },
+              data:    rows,
+              total,
+              page,
+              limit,
+              pages:   Math.ceil(total / limit),
+            }, null, 2),
+          }],
+        };
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `Error: ${err.message}` }], isError: true };
       }

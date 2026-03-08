@@ -17,6 +17,8 @@ rsync -av \
   --exclude='*.db' \
   --exclude='*.db-journal' \
   --exclude='drizzle/' \
+  --exclude='.claude/' \
+  --exclude='PLAN.md' \
   "$SOURCE_DIR/" \
   "$DEPLOY_DIR/"
 
