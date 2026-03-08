@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { config } from '../config';
 import { query, transaction, toPositional } from '../db';
+import { sanitizeSingleLine, sanitizeMultiLine } from '../utils/sanitize';
 
 const router = Router();
 const GSA_BASE = 'https://api.gsa.gov/technology/site-scanning/v1';
@@ -43,8 +44,8 @@ function gsaToDbRow(s: any, now: string): Record<string, unknown> {
     page_hash: s.page_hash ?? null,
     scan_date: s.scan_date ?? null,
     test_404: boolInt((s as any)['404_test'] ?? s.test_404),
-    agency: s.agency ?? null,
-    bureau: s.bureau ?? null,
+    agency: sanitizeSingleLine(s.agency),
+    bureau: sanitizeSingleLine(s.bureau),
     branch: s.branch ?? null,
     primary_scan_status: s.primary_scan_status ?? null,
     accessibility_scan_status: s.accessibility_scan_status ?? null,
@@ -63,8 +64,8 @@ function gsaToDbRow(s: any, now: string): Record<string, unknown> {
     search_dot_gov: s.search_dot_gov ?? null,
     ipv6: boolInt(s.ipv6),
     hostname: s.hostname ?? null,
-    cms: s.cms ?? null,
-    login_provider: s.login_provider ?? null,
+    cms: sanitizeSingleLine(s.cms),
+    login_provider: sanitizeSingleLine(s.login_provider),
     site_search: boolInt(s.site_search),
     viewport_meta_tag: boolInt(s.viewport_meta_tag),
     main_element_present: boolInt(s.main_element_present),
@@ -72,11 +73,11 @@ function gsaToDbRow(s: any, now: string): Record<string, unknown> {
     language_link: s.language_link ?? null,
     cumulative_layout_shift: s.cumulative_layout_shift ?? null,
     largest_contentful_paint: s.largest_contentful_paint ?? null,
-    title: s.title ?? null,
-    description: s.description ?? null,
+    title: sanitizeSingleLine(s.title),
+    description: sanitizeMultiLine(s.description),
     keywords: s.keywords ?? null,
-    og_title: s.og_title ?? null,
-    og_description: s.og_description ?? null,
+    og_title: sanitizeSingleLine(s.og_title),
+    og_description: sanitizeMultiLine(s.og_description),
     og_image: s.og_image ?? null,
     og_article_published: s.og_article_published ?? null,
     og_article_modified: s.og_article_modified ?? null,

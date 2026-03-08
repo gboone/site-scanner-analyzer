@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, transaction, toPositional } from '../db';
 import type { SiteRecord, ImportResult } from 'shared';
+import { sanitizeSingleLine, sanitizeMultiLine } from '../utils/sanitize';
 
 const router = Router();
 
@@ -23,8 +24,8 @@ function toDbRow(site: SiteRecord): Record<string, unknown> {
     page_hash: site.page_hash ?? null,
     scan_date: site.scan_date ?? null,
     test_404: (site as any)['404_test'] ? 1 : 0,
-    agency: site.agency ?? null,
-    bureau: site.bureau ?? null,
+    agency: sanitizeSingleLine(site.agency),
+    bureau: sanitizeSingleLine(site.bureau),
     branch: site.branch ?? null,
     primary_scan_status: site.primary_scan_status ?? null,
     accessibility_scan_status: site.accessibility_scan_status ?? null,
@@ -43,8 +44,8 @@ function toDbRow(site: SiteRecord): Record<string, unknown> {
     search_dot_gov: site.search_dot_gov ?? null,
     ipv6: site.ipv6 ? 1 : 0,
     hostname: site.hostname ?? null,
-    cms: site.cms ?? null,
-    login_provider: site.login_provider ?? null,
+    cms: sanitizeSingleLine(site.cms),
+    login_provider: sanitizeSingleLine(site.login_provider),
     site_search: site.site_search ? 1 : 0,
     viewport_meta_tag: site.viewport_meta_tag ? 1 : 0,
     main_element_present: site.main_element_present ? 1 : 0,
@@ -52,11 +53,11 @@ function toDbRow(site: SiteRecord): Record<string, unknown> {
     language_link: site.language_link ?? null,
     cumulative_layout_shift: site.cumulative_layout_shift ?? null,
     largest_contentful_paint: site.largest_contentful_paint ?? null,
-    title: site.title ?? null,
-    description: site.description ?? null,
+    title: sanitizeSingleLine(site.title),
+    description: sanitizeMultiLine(site.description),
     keywords: site.keywords ?? null,
-    og_title: site.og_title ?? null,
-    og_description: site.og_description ?? null,
+    og_title: sanitizeSingleLine(site.og_title),
+    og_description: sanitizeMultiLine(site.og_description),
     og_image: site.og_image ?? null,
     og_article_published: site.og_article_published ?? null,
     og_article_modified: site.og_article_modified ?? null,
