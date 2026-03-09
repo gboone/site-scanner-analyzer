@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, execute } from '../db';
+import { PUBLIC_ONLY_CONDITION } from '../utils/publicFilter';
 
 const router = Router();
 
@@ -42,27 +43,7 @@ router.get('/', async (req: Request, res: Response) => {
   if (req.query.https_enforced === 'true') conditions.push('https_enforced = 1');
   if (req.query.has_login === 'true') conditions.push('login_provider IS NOT NULL');
   if (req.query.no_redirect === 'true') conditions.push('(redirect = 0 OR redirect IS NULL)');
-  if (req.query.public_only === 'true') conditions.push(
-    `(redirect = 0 OR redirect IS NULL) AND live = 1 AND (status_code = 200 OR status_code IS NULL) AND (
-      title IS NULL OR title = '' OR (
-        title NOT LIKE '%login%' AND
-        title NOT LIKE '%log in%' AND
-        title NOT LIKE '%sign in%' AND
-        title NOT LIKE '%sign-in%' AND
-        title NOT LIKE '%request rejected%' AND
-        title NOT LIKE '%access denied%' AND
-        title NOT LIKE '%unauthorized%' AND
-        title NOT LIKE '%default website%' AND
-        title NOT LIKE '%welcome to iis%' AND
-        title NOT LIKE '%welcome to default%' AND
-        title NOT LIKE '%outlook%' AND
-        title NOT LIKE '%webmail%' AND
-        title NOT LIKE '%forbidden%' AND
-        title NOT LIKE '%it security%' AND
-        title NOT LIKE '%page not found%'
-      )
-    )`
-  );
+  if (req.query.public_only === 'true') conditions.push(PUBLIC_ONLY_CONDITION);
   if (req.query.agency) {
     conditions.push('agency = :agency');
     params.agency = req.query.agency;
