@@ -1,35 +1,12 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { query } from '../db';
+import { PUBLIC_ONLY_CONDITION } from '../utils/publicFilter';
 
 const router = Router();
 
 const MAX_SITES = 500;
 const DISAMBIGUATION_RATIO_THRESHOLD = 1.5;
-
-// Kept as a string constant (not abstracted) to stay in sync manually with sites.ts:46-64.
-const PUBLIC_ONLY_CONDITION = `(redirect = 0 OR redirect IS NULL)
-  AND live = 1
-  AND (status_code = 200 OR status_code IS NULL)
-  AND (
-    title IS NULL OR title = '' OR (
-      title NOT LIKE '%login%'
-      AND title NOT LIKE '%log in%'
-      AND title NOT LIKE '%sign in%'
-      AND title NOT LIKE '%sign-in%'
-      AND title NOT LIKE '%request rejected%'
-      AND title NOT LIKE '%access denied%'
-      AND title NOT LIKE '%unauthorized%'
-      AND title NOT LIKE '%default website%'
-      AND title NOT LIKE '%welcome to iis%'
-      AND title NOT LIKE '%welcome to default%'
-      AND title NOT LIKE '%outlook%'
-      AND title NOT LIKE '%webmail%'
-      AND title NOT LIKE '%forbidden%'
-      AND title NOT LIKE '%it security%'
-      AND title NOT LIKE '%page not found%'
-    )
-  )`;
 
 interface AgencyCandidate {
   name: string;
