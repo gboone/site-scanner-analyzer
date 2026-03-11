@@ -67,6 +67,7 @@ export const PUBLIC_ONLY_CONDITION = `(redirect = 0 OR redirect IS NULL)
     AND domain NOT LIKE '%.vpn.%'
     AND domain NOT LIKE '%-vpn.%'
   )
+  AND (excluded = 0 OR excluded IS NULL)
   AND (
     title IS NULL OR title = '' OR (
       -- Authentication / access-control pages

@@ -45,3 +45,15 @@ export function useImport() {
     },
   });
 }
+
+export function useBulkExclude() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ domains, excluded }: { domains: string[]; excluded: boolean }) =>
+      api.bulkExclude(domains, excluded) as any,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sites'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
+  });
+}
