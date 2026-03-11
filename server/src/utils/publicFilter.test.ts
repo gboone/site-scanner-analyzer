@@ -187,4 +187,10 @@ describe('PUBLIC_ONLY_CONDITION', () => {
   it('excludes remote access titles', () => {
     assert.ok(PUBLIC_ONLY_CONDITION.includes("title NOT LIKE '%remote access%'"));
   });
+
+  // ── Manual exclusion ──────────────────────────────────────────────────────
+
+  it('excludes manually excluded sites', () => {
+    assert.ok(PUBLIC_ONLY_CONDITION.includes('excluded = 0 OR excluded IS NULL'));
+  });
 });

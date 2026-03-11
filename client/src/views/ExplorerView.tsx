@@ -7,7 +7,7 @@ import Pagination from '../components/data-table/Pagination';
 import SiteDetail from '../components/site-detail/SiteDetail';
 import { DomainImportModal } from '../components/import/DomainImportModal';
 import AgencyBureauFilter from '../components/AgencyBureauFilter';
-import { useSites, useScanSessions } from '../hooks/useSites';
+import { useSites, useScanSessions, useBulkExclude } from '../hooks/useSites';
 import { useUIStore } from '../store/uiStore';
 import { useScanQueue } from '../contexts/ScanQueueContext';
 import { api } from '../lib/api';
@@ -132,6 +132,7 @@ interface Props {
 export default function ExplorerView({ onNavigate }: Props) {
   const { scan, startScan, stopScan } = useScanQueue();
   const { openDetail, selectedDomain, detailPanelOpen, setReport } = useUIStore();
+  const { mutateAsync: bulkExclude, isPending: excludePending } = useBulkExclude();
   const [page, setPage] = React.useState(1);
   const [sort, setSort] = React.useState('domain');
   const [order, setOrder] = React.useState('asc');
@@ -316,6 +317,22 @@ export default function ExplorerView({ onNavigate }: Props) {
     onNavigate('multi-report');
   };
 
+  /** Bulk-exclude selected sites and clear the selection. */
+  const excludeSelected = async () => {
+    const domains = Array.from(selectedDomains);
+    if (domains.length === 0) return;
+    await bulkExclude({ domains, excluded: true });
+    clearSelection();
+  };
+
+  /** Remove exclusion from selected sites and clear the selection. */
+  const includeSelected = async () => {
+    const domains = Array.from(selectedDomains);
+    if (domains.length === 0) return;
+    await bulkExclude({ domains, excluded: false });
+    clearSelection();
+  };
+
   const totalResults = data?.total ?? 0;
   const pageSize = data?.data?.length ?? 0;
   const hasMoreThanOnePage = totalResults > pageSize && pageSize > 0;
@@ -474,6 +491,25 @@ export default function ExplorerView({ onNavigate }: Props) {
             ) : (
               <button onClick={stopScan} className="btn-secondary text-xs py-0.5 px-2 text-red-600 border-red-300">
                 <span aria-hidden="true">⏹ </span>Stop
+              </button>
+            )}
+            {filters.show_excluded === 'true' ? (
+              <button
+                onClick={includeSelected}
+                disabled={excludePending || scan.running}
+                className="btn-secondary text-xs py-0.5 px-2 text-green-700 border-green-300"
+                title="Remove exclusion and return these sites to public views"
+              >
+                ✓ Include selected ({selectedDomains.size})
+              </button>
+            ) : (
+              <button
+                onClick={excludeSelected}
+                disabled={excludePending || scan.running}
+                className="btn-secondary text-xs py-0.5 px-2 text-red-600 border-red-300"
+                title="Hide these sites from public views and report results"
+              >
+                ✗ Exclude selected ({selectedDomains.size})
               </button>
             )}
             <button onClick={clearSelection} disabled={scan.running} className="btn-secondary text-xs py-0.5 px-2">

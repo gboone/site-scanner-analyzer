@@ -11,6 +11,7 @@ const CHIPS = [
   { key: 'has_dap', value: 'true', label: 'Has DAP', color: 'blue' },
   { key: 'https_enforced', value: 'true', label: 'HTTPS ✓', color: 'green' },
   { key: 'has_login', value: 'true', label: 'Has Login', color: 'gray' },
+  { key: 'show_excluded', value: 'true', label: 'Excluded', color: 'red' },
 ];
 
 const COLOR_MAP: Record<string, { active: string; inactive: string }> = {
@@ -18,6 +19,7 @@ const COLOR_MAP: Record<string, { active: string; inactive: string }> = {
   blue: { active: 'bg-gov-blue text-white border-gov-blue', inactive: 'bg-white text-gov-blue border-blue-300 hover:bg-blue-50' },
   yellow: { active: 'bg-yellow-500 text-white border-yellow-500', inactive: 'bg-white text-yellow-700 border-yellow-300 hover:bg-yellow-50' },
   gray: { active: 'bg-gray-600 text-white border-gray-600', inactive: 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50' },
+  red: { active: 'bg-red-600 text-white border-red-600', inactive: 'bg-white text-red-600 border-red-300 hover:bg-red-50' },
 };
 
 interface FilterChipsProps {
