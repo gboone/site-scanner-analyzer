@@ -356,6 +356,7 @@ export async function initDb(): Promise<void> {
   await addCol('detected_technologies');
   await addCol('security_header_csp');
   await addCol('security_header_xss');
+  await addCol('excluded', 'INTEGER');
 
   // Clean up any null-domain rows from old broken imports
   const [deleted] = await pool.query('DELETE FROM sites WHERE domain IS NULL') as any;
