@@ -22,6 +22,8 @@ export const api = {
   getSite: (domain: string) => request(`/sites/${encodeURIComponent(domain)}`),
   updateSite: (domain: string, data: Record<string, unknown>) =>
     request(`/sites/${encodeURIComponent(domain)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  bulkExclude: (domains: string[], excluded: boolean) =>
+    request('/sites/exclude', { method: 'POST', body: JSON.stringify({ domains, excluded }) }),
   getStats: (filter?: { agency?: string; bureau?: string; domains?: string[] }) => {
     const q = new URLSearchParams();
     if (filter?.agency) q.set('agency', filter.agency);

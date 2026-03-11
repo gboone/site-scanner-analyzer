@@ -34,6 +34,13 @@ router.get('/', async (req: Request, res: Response) => {
     params.search = `%${search}%`;
   }
 
+  // Excluded sites: hidden by default; show_excluded=true reveals only excluded sites
+  if (req.query.show_excluded === 'true') {
+    conditions.push('excluded = 1');
+  } else {
+    conditions.push('(excluded = 0 OR excluded IS NULL)');
+  }
+
   // Quick filter chips
   if (req.query.live === 'true') conditions.push('live = 1');
   if (req.query.live === 'false') conditions.push('live = 0');
@@ -76,6 +83,38 @@ router.get('/', async (req: Request, res: Response) => {
     console.error('[sites] GET / error:', err.message);
     res.status(500).json({ error: 'Failed to fetch sites' });
   }
+});
+
+// POST /api/v1/sites/exclude - bulk exclude or re-include sites
+// Must be registered BEFORE /:domain so Express doesn't treat "exclude" as a domain param.
+router.post('/exclude', async (req: Request, res: Response) => {
+  const { domains, excluded } = req.body;
+
+  if (!Array.isArray(domains) || domains.length === 0) {
+    res.status(400).json({ error: '"domains" must be a non-empty array of strings' });
+    return;
+  }
+  if (typeof excluded !== 'boolean') {
+    res.status(400).json({ error: '"excluded" must be a boolean' });
+    return;
+  }
+  // Validate each domain — must be non-empty strings only
+  const cleanDomains = domains.map(String).filter(d => d.trim().length > 0);
+  if (cleanDomains.length === 0) {
+    res.status(400).json({ error: 'No valid domains provided' });
+    return;
+  }
+
+  const value = excluded ? 1 : 0;
+  const now = new Date().toISOString();
+  const placeholders = cleanDomains.map(() => '?').join(', ');
+
+  await execute(
+    `UPDATE sites SET excluded = ?, updated_at = ? WHERE domain IN (${placeholders})`,
+    [value, now, ...cleanDomains]
+  );
+
+  res.json({ updated: cleanDomains.length, excluded: value });
 });
 
 // GET /api/v1/sites/:domain - single site with scan history

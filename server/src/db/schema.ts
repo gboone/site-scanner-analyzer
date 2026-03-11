@@ -129,6 +129,9 @@ export const sites = mysqlTable('sites', {
   // Local tracking
   imported_at: text('imported_at').notNull().default(TS_DEFAULT),
   updated_at: text('updated_at').notNull().default(TS_DEFAULT),
+  // Manual exclusion — set to 1 to hide from Explorer and public views
+  // Migration: ALTER TABLE sites ADD COLUMN excluded INT DEFAULT 0;
+  excluded: int('excluded').default(0),
 }, (table) => ({
   agencyIdx: index('idx_sites_agency').on(table.agency),
   bureauIdx: index('idx_sites_bureau').on(table.bureau),
