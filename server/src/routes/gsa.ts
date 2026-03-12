@@ -284,6 +284,98 @@ const UPSERT_SQL = `
     updated_at                 = VALUES(updated_at)
 `;
 
+export interface GsaImportResult {
+  inserted: number;
+  updated: number;
+  pages_fetched: number;
+  error_count: number;
+  errors: string[];
+}
+
+export interface GsaImportCallbacks {
+  onStart?: (totalPages: number, totalCount: number) => void;
+  onProgress?: (page: number, totalPages: number, inserted: number, updated: number) => void;
+}
+
+/**
+ * Core GSA import logic — fetches all pages for the given agency (or all
+ * agencies) and upserts into the sites table.
+ *
+ * Optional callbacks let callers stream progress events (HTTP route) or log
+ * them (scheduler). The first page is only fetched once.
+ */
+export async function importFromGsa(
+  agency: string | undefined,
+  callbacks?: GsaImportCallbacks
+): Promise<GsaImportResult> {
+  const firstPage = await fetchOnePage(agency, 1);
+  const meta = firstPage.meta ?? firstPage;
+  const totalCount: number = meta.totalItems ?? firstPage.count ?? firstPage.total ?? (firstPage.items?.length ?? 0);
+  const totalPages: number = meta.totalPages ?? Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  callbacks?.onStart?.(totalPages, totalCount);
+
+  const now = new Date().toISOString();
+  let inserted = 0;
+  let updated = 0;
+  const errors: string[] = [];
+
+  // Load existing domains once so we can track inserted vs updated counts.
+  const existingRows = await query<{ domain: string }>('SELECT domain FROM sites');
+  const existingDomains = new Set(existingRows.map(r => r.domain));
+
+  /** Validate, map, and upsert a slice of raw GSA items into the DB. */
+  const processItems = async (items: any[]) => {
+    const valid: { row: Record<string, unknown>; isNew: boolean }[] = [];
+    for (const s of items) {
+      const domain = s.initial_domain ?? s.domain ?? null;
+      if (!domain) {
+        errors.push(`skipped: missing domain (initial_url=${s.initial_url ?? 'unknown'})`);
+        continue;
+      }
+      valid.push({ row: gsaToDbRow(s, now), isNew: !existingDomains.has(domain) });
+      existingDomains.add(domain); // deduplicate within the same payload
+    }
+
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < valid.length; i += BATCH_SIZE) {
+      const batch = valid.slice(i, i + BATCH_SIZE);
+      try {
+        await transaction(async (client) => {
+          for (const { row } of batch) {
+            const [s, a] = toPositional(UPSERT_SQL, row);
+            await client.query(s, a);
+          }
+        });
+        for (const { isNew } of batch) {
+          if (isNew) inserted++; else updated++;
+        }
+      } catch (e: any) {
+        errors.push(`Batch error (rows ${i}–${i + batch.length - 1}): ${e.message}`);
+      }
+    }
+  };
+
+  // Process first page
+  await processItems(firstPage.items ?? firstPage.results ?? []);
+  callbacks?.onProgress?.(1, totalPages, inserted, updated);
+
+  // Fetch and process remaining pages in parallel batches of 5,
+  // writing to the DB and streaming progress after each batch so the
+  // connection stays alive and memory stays bounded.
+  for (let start = 2; start <= totalPages; start += 5) {
+    const end = Math.min(start + 4, totalPages);
+    const pages = await Promise.all(
+      Array.from({ length: end - start + 1 }, (_, i) => fetchOnePage(agency, start + i))
+    );
+    const items = pages.flatMap(p => p.items ?? p.results ?? []);
+    await processItems(items);
+    callbacks?.onProgress?.(end, totalPages, inserted, updated);
+  }
+
+  return { inserted, updated, pages_fetched: totalPages, error_count: errors.length, errors: errors.slice(0, 20) };
+}
+
 /**
  * POST /api/v1/gsa/import
  *
@@ -312,80 +404,26 @@ router.post('/import', async (req: Request, res: Response) => {
   const send = (data: object) => res.write(JSON.stringify(data) + '\n');
 
   try {
-    const firstPage = await fetchOnePage(agency, 1);
-    const meta = firstPage.meta ?? firstPage;
-    const totalCount: number = meta.totalItems ?? firstPage.count ?? firstPage.total ?? (firstPage.items?.length ?? 0);
-    const totalPages: number = meta.totalPages ?? Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-
-    send({ type: 'start', totalPages, totalCount });
-
-    const now = new Date().toISOString();
-    let inserted = 0;
-    let updated = 0;
-    const errors: string[] = [];
-
-    // Load existing domains once so we can track inserted vs updated counts.
-    const existingRows = await query<{ domain: string }>('SELECT domain FROM sites');
-    const existingDomains = new Set(existingRows.map(r => r.domain));
-
-    /** Validate, map, and upsert a slice of raw GSA items into the DB. */
-    const processItems = async (items: any[]) => {
-      const valid: { row: Record<string, unknown>; isNew: boolean }[] = [];
-      for (const s of items) {
-        const domain = s.initial_domain ?? s.domain ?? null;
-        if (!domain) {
-          errors.push(`skipped: missing domain (initial_url=${s.initial_url ?? 'unknown'})`);
-          continue;
-        }
-        valid.push({ row: gsaToDbRow(s, now), isNew: !existingDomains.has(domain) });
-        existingDomains.add(domain); // deduplicate within the same payload
-      }
-
-      const BATCH_SIZE = 100;
-      for (let i = 0; i < valid.length; i += BATCH_SIZE) {
-        const batch = valid.slice(i, i + BATCH_SIZE);
-        try {
-          await transaction(async (client) => {
-            for (const { row } of batch) {
-              const [s, a] = toPositional(UPSERT_SQL, row);
-              await client.query(s, a);
-            }
-          });
-          for (const { isNew } of batch) {
-            if (isNew) inserted++; else updated++;
-          }
-        } catch (e: any) {
-          errors.push(`Batch error (rows ${i}–${i + batch.length - 1}): ${e.message}`);
-        }
-      }
-    };
-
-    // Process first page
-    await processItems(firstPage.items ?? firstPage.results ?? []);
-    send({ type: 'progress', page: 1, totalPages, inserted, updated });
-
-    // Fetch and process remaining pages in parallel batches of 5,
-    // writing to the DB and streaming progress after each batch so the
-    // connection stays alive and memory stays bounded.
-    for (let start = 2; start <= totalPages; start += 5) {
-      const end = Math.min(start + 4, totalPages);
-      const pages = await Promise.all(
-        Array.from({ length: end - start + 1 }, (_, i) => fetchOnePage(agency, start + i))
-      );
-      const items = pages.flatMap(p => p.items ?? p.results ?? []);
-      await processItems(items);
-      send({ type: 'progress', page: end, totalPages, inserted, updated });
-    }
+    let totalPagesForResponse = 0;
+    const result = await importFromGsa(agency, {
+      onStart: (totalPages, totalCount) => {
+        totalPagesForResponse = totalPages;
+        send({ type: 'start', totalPages, totalCount });
+      },
+      onProgress: (page, _total, inserted, updated) => {
+        send({ type: 'progress', page, totalPages: totalPagesForResponse, inserted, updated });
+      },
+    });
 
     res.end(
       JSON.stringify({
         type: 'complete',
-        inserted,
-        updated,
-        total_sites: inserted + updated,
-        pages_fetched: totalPages,
-        error_count: errors.length,
-        errors: errors.slice(0, 20),
+        inserted: result.inserted,
+        updated: result.updated,
+        total_sites: result.inserted + result.updated,
+        pages_fetched: result.pages_fetched,
+        error_count: result.error_count,
+        errors: result.errors,
       }) + '\n'
     );
   } catch (err: any) {
