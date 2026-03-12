@@ -309,3 +309,10 @@ export async function saveSettings(updates: Record<string, string>): Promise<voi
     await writeSetting(key, value);
   }
 }
+
+/** Stop all cron tasks. Called during graceful shutdown. */
+export function shutdown(): void {
+  if (gsaTask) { gsaTask.stop(); gsaTask = null; }
+  if (scanTask) { scanTask.stop(); scanTask = null; }
+  console.log('[scheduler] Jobs stopped.');
+}
