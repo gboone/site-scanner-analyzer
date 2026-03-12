@@ -115,4 +115,18 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+
+  // Scheduler — configured scheduled background jobs
+  getSchedulerStatus: () => request<{
+    gsa: { enabled: boolean; interval: string; agency?: string; last_run?: string; last_status?: string };
+    scan: { enabled: boolean; interval: string; filter: string; last_run?: string; last_status?: string; last_session_id?: string };
+  }>('/scheduler/status'),
+  updateGsaSchedule: (data: { enabled?: boolean; interval?: string; agency?: string }) =>
+    request('/scheduler/gsa', { method: 'PUT', body: JSON.stringify(data) }),
+  updateScanSchedule: (data: { enabled?: boolean; interval?: string; filter?: string }) =>
+    request('/scheduler/scan', { method: 'PUT', body: JSON.stringify(data) }),
+  triggerGsaRefresh: () =>
+    request('/scheduler/gsa/run', { method: 'POST' }),
+  triggerSiteRescan: () =>
+    request('/scheduler/scan/run', { method: 'POST' }),
 };

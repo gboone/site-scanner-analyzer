@@ -17,6 +17,8 @@ import scanSessionsRouter from './routes/scan-sessions';
 import { agenciesRouter, bureausRouter } from './routes/agencies';
 import reportRouter from './routes/report';
 import mcpRouter from './routes/mcp';
+import schedulerRouter from './routes/scheduler';
+import { setupScheduler } from './scheduler';
 import { validateUrlForSsrf } from './middleware/ssrf-protection';
 
 const app = express();
@@ -71,6 +73,7 @@ async function main() {
     }
   }
 
+  // ---------------------------------------------------------------------------
   // Load any settings previously saved via the UI into the live config object.
   // This ensures keys saved in a previous session are available without a .env edit.
   // (.env values take precedence — only apply DB value if .env didn't already set it.)
@@ -125,6 +128,7 @@ async function main() {
   app.use('/api/v1/agencies',       agenciesRouter);
   app.use('/api/v1/bureaus',        bureausRouter);
   app.use('/api/v1/report',         reportRouter);
+  app.use('/api/v1/scheduler',      schedulerRouter);
   app.use('/mcp',                   mcpRouter);
 
   // Settings endpoint (simple key/value store)
@@ -283,6 +287,11 @@ async function main() {
   // ---------------------------------------------------------------------------
   // 6. Ready
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 7b. Scheduler — start background jobs after routes are registered
+  // ---------------------------------------------------------------------------
+  await setupScheduler();
+
   console.log(`  - Glean: ${config.gleanEndpoint ? '✓ configured' : '✗ not configured'}`);
   console.log(`  - GSA API: ${config.gsaApiKey ? '✓ configured' : '✗ not configured'}`);
   console.log('✓ Startup complete — all routes active');
