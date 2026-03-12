@@ -205,7 +205,8 @@ export default function SettingsView() {
   };
 
   return (
-    <div className="p-6 max-w-2xl overflow-auto">
+    <div className="overflow-y-auto h-full">
+      <div className="p-6 max-w-2xl">
       <h1 className="text-xl font-bold text-gray-900 mb-2">Settings</h1>
       <p className="text-sm text-gray-500 mb-6">
         API keys are stored in the <code className="bg-gray-100 px-1 rounded">.env</code> file at the project root.
@@ -455,6 +456,7 @@ export default function SettingsView() {
             {schedSaving ? 'Saving…' : 'Save schedule'}
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
