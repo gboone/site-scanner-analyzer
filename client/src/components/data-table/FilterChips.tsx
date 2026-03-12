@@ -11,7 +11,7 @@ const CHIPS = [
   { key: 'has_dap', value: 'true', label: 'Has DAP', color: 'blue' },
   { key: 'https_enforced', value: 'true', label: 'HTTPS ✓', color: 'green' },
   { key: 'has_login', value: 'true', label: 'Has Login', color: 'gray' },
-  { key: 'show_excluded', value: 'true', label: 'Excluded', color: 'red' },
+  { key: 'show_hidden', value: 'true', label: 'My Hidden', color: 'red' },
 ];
 
 const COLOR_MAP: Record<string, { active: string; inactive: string }> = {

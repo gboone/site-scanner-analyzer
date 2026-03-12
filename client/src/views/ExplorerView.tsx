@@ -7,7 +7,8 @@ import Pagination from '../components/data-table/Pagination';
 import SiteDetail from '../components/site-detail/SiteDetail';
 import { DomainImportModal } from '../components/import/DomainImportModal';
 import AgencyBureauFilter from '../components/AgencyBureauFilter';
-import { useSites, useScanSessions, useBulkExclude } from '../hooks/useSites';
+import { useSites, useScanSessions } from '../hooks/useSites';
+import { useHiddenSites } from '../hooks/useHiddenSites';
 import { useUIStore } from '../store/uiStore';
 import { useScanQueue } from '../contexts/ScanQueueContext';
 import { api } from '../lib/api';
@@ -131,8 +132,8 @@ interface Props {
 
 export default function ExplorerView({ onNavigate }: Props) {
   const { scan, startScan, stopScan } = useScanQueue();
-  const { openDetail, selectedDomain, detailPanelOpen, setReport } = useUIStore();
-  const { mutateAsync: bulkExclude, isPending: excludePending } = useBulkExclude();
+  const { openDetail, selectedDomain, detailPanelOpen, setReport, setFilter } = useUIStore();
+  const { hidden, hide, unhide, clearAll: clearAllHidden } = useHiddenSites();
   const [page, setPage] = React.useState(1);
   const [sort, setSort] = React.useState('domain');
   const [order, setOrder] = React.useState('asc');
@@ -154,8 +155,11 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [agencyFilter, setAgencyFilter] = React.useState('');
   const [bureauFilter, setBureauFilter] = React.useState('');
 
+  // Overfetch to compensate for client-side hidden rows, capped at 100 total
+  const fetchLimit = filters.show_hidden === 'true' ? 25 : Math.min(25 + hidden.size, 100);
+
   const queryParams = {
-    page, limit: 25,
+    page, limit: fetchLimit,
     sort: groupByFinalDomain ? 'final_domain' : sort,
     order: groupByFinalDomain ? 'asc' : order,
     ...filters,
@@ -163,6 +167,15 @@ export default function ExplorerView({ onNavigate }: Props) {
     ...(bureauFilter ? { bureau: bureauFilter } : {}),
   };
   const { data, isLoading } = useSites(queryParams);
+
+  // Apply client-side hidden filter and cap at 25 visible rows
+  const visibleRows = React.useMemo(() => {
+    const rows: any[] = data?.data || [];
+    if (filters.show_hidden === 'true') {
+      return rows.filter((r) => hidden.has(String(r.domain)));
+    }
+    return rows.filter((r) => !hidden.has(String(r.domain))).slice(0, 25);
+  }, [data, hidden, filters.show_hidden]);
 
   const handleFilter = React.useCallback((f: Record<string, string>) => {
     setFilters(f);
@@ -317,19 +330,19 @@ export default function ExplorerView({ onNavigate }: Props) {
     onNavigate('multi-report');
   };
 
-  /** Bulk-exclude selected sites and clear the selection. */
-  const excludeSelected = async () => {
+  /** Hide selected sites in this browser's personal view. */
+  const hideSelected = () => {
     const domains = Array.from(selectedDomains);
     if (domains.length === 0) return;
-    await bulkExclude({ domains, excluded: true });
+    hide(domains);
     clearSelection();
   };
 
-  /** Remove exclusion from selected sites and clear the selection. */
-  const includeSelected = async () => {
+  /** Unhide selected sites from this browser's personal view. */
+  const unhideSelected = () => {
     const domains = Array.from(selectedDomains);
     if (domains.length === 0) return;
-    await bulkExclude({ domains, excluded: false });
+    unhide(domains);
     clearSelection();
   };
 
@@ -392,6 +405,25 @@ export default function ExplorerView({ onNavigate }: Props) {
         </div>
 
         <DomainImportModal open={importOpen} onOpenChange={setImportOpen} />
+
+        {/* Personal hidden sites banner */}
+        {hidden.size > 0 && filters.show_hidden !== 'true' && (
+          <div className="px-4 py-1 bg-yellow-50 border-b border-yellow-200 text-xs text-yellow-700 flex items-center gap-2">
+            <span>
+              {hidden.size} site{hidden.size !== 1 ? 's' : ''} hidden in your personal view
+            </span>
+            <button
+              onClick={() => setFilter('show_hidden', 'true')}
+              className="underline hover:text-yellow-900"
+            >
+              show them
+            </button>
+            <span aria-hidden="true">·</span>
+            <button onClick={clearAllHidden} className="underline hover:text-yellow-900">
+              reset view
+            </button>
+          </div>
+        )}
 
         {/* Scan history bar — shown when sessions exist and not currently scanning */}
         {!scan.running && Array.isArray(scanSessions) && scanSessions.length > 0 && (
@@ -493,23 +525,23 @@ export default function ExplorerView({ onNavigate }: Props) {
                 <span aria-hidden="true">⏹ </span>Stop
               </button>
             )}
-            {filters.show_excluded === 'true' ? (
+            {filters.show_hidden === 'true' ? (
               <button
-                onClick={includeSelected}
-                disabled={excludePending || scan.running}
+                onClick={unhideSelected}
+                disabled={scan.running}
                 className="btn-secondary text-xs py-0.5 px-2 text-green-700 border-green-300"
-                title="Remove exclusion and return these sites to public views"
+                title="Restore these sites to your personal view"
               >
-                ✓ Include selected ({selectedDomains.size})
+                ✓ Unhide selected ({selectedDomains.size})
               </button>
             ) : (
               <button
-                onClick={excludeSelected}
-                disabled={excludePending || scan.running}
+                onClick={hideSelected}
+                disabled={scan.running}
                 className="btn-secondary text-xs py-0.5 px-2 text-red-600 border-red-300"
-                title="Hide these sites from public views and report results"
+                title="Hide these sites from your personal view (only affects this browser)"
               >
-                ✗ Exclude selected ({selectedDomains.size})
+                Hide selected ({selectedDomains.size})
               </button>
             )}
             <button onClick={clearSelection} disabled={scan.running} className="btn-secondary text-xs py-0.5 px-2">
@@ -540,7 +572,7 @@ export default function ExplorerView({ onNavigate }: Props) {
         )}
 
         <DataTable
-          data={data?.data || []}
+          data={visibleRows}
           columns={COLUMNS}
           onRowClick={(row) => openDetail(String(row.domain))}
           selectedKey={selectedDomain}
