@@ -25,6 +25,7 @@ interface DataTableProps<T> {
   selectedRows?: Set<string>;
   onToggleRow?: (key: string) => void;
   onToggleAll?: (keys: string[]) => void;
+  onRangeToggle?: (keys: string[]) => void;
   /** Controlled server-side sort — column id currently sorted */
   sortColumn?: string;
   /** Controlled server-side sort — current direction */
@@ -48,6 +49,7 @@ export function DataTable<T>({
   selectedRows,
   onToggleRow,
   onToggleAll,
+  onRangeToggle,
   sortColumn,
   sortOrder,
   onSortChange,
@@ -66,6 +68,30 @@ export function DataTable<T>({
     getCoreRowModel: getCoreRowModel(),
     manualSorting: true,
   });
+
+  // Track last-toggled row index for shift-click range selection (no re-render needed)
+  const lastToggledIndexRef = React.useRef<number | null>(null);
+  // Reset when data changes so shift-click can't span across page/filter transitions
+  React.useEffect(() => {
+    lastToggledIndexRef.current = null;
+  }, [data]);
+
+  const handleCheckboxClick = (e: React.MouseEvent<HTMLInputElement>, rowIndex: number, key: string) => {
+    e.stopPropagation();
+    if (e.shiftKey && lastToggledIndexRef.current !== null && onRangeToggle) {
+      e.preventDefault(); // suppress default checkbox toggle; onChange won't fire
+      const rows = table.getRowModel().rows;
+      const start = Math.min(lastToggledIndexRef.current, rowIndex);
+      const end   = Math.max(lastToggledIndexRef.current, rowIndex);
+      const rangeKeys = rows.slice(start, end + 1).map((r) =>
+        getRowKey ? getRowKey(r.original) : String((r.original as any).domain)
+      );
+      onRangeToggle(rangeKeys);
+      lastToggledIndexRef.current = rowIndex;
+    } else {
+      lastToggledIndexRef.current = rowIndex;
+    }
+  };
 
   // Expose table instance to parent after first render
   const onTableReadyRef = React.useRef(onTableReady);
@@ -169,7 +195,7 @@ export function DataTable<T>({
                   groupSizes[gk] = (groupSizes[gk] ?? 0) + 1;
                 }
               }
-              return rows.flatMap((row) => {
+              return rows.flatMap((row, rowIndex) => {
                 const key = getRowKey ? getRowKey(row.original) : String((row.original as any).domain);
                 const isSingleSelected = selectedKey === key;
                 const isBulkSelected = selectable && (selectedRows?.has(key) ?? false);
@@ -210,7 +236,7 @@ export function DataTable<T>({
                           type="checkbox"
                           checked={isBulkSelected}
                           onChange={() => onToggleRow?.(key)}
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={(e) => handleCheckboxClick(e, rowIndex, key)}
                           aria-label={`${isBulkSelected ? 'Deselect' : 'Select'} ${key}`}
                           className="cursor-pointer accent-gov-blue"
                         />
