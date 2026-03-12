@@ -247,6 +247,14 @@ export default function ExplorerView({ onNavigate }: Props) {
     });
   }, []);
 
+  const rangeToggle = React.useCallback((domains: string[]) => {
+    setSelectedDomains((prev) => {
+      const next = new Set(prev);
+      domains.forEach((d) => next.add(d));
+      return next;
+    });
+  }, []);
+
   const clearSelection = () => setSelectedDomains(new Set());
 
   /** Fetch ALL matching rows (up to 1000) and bulk-select them */
@@ -583,6 +591,7 @@ export default function ExplorerView({ onNavigate }: Props) {
           selectedRows={selectedDomains}
           onToggleRow={toggleRow}
           onToggleAll={toggleAll}
+          onRangeToggle={rangeToggle}
           sortColumn={groupByFinalDomain ? 'final_domain' : sort}
           sortOrder={groupByFinalDomain ? 'asc' : (order as 'asc' | 'desc')}
           onSortChange={groupByFinalDomain ? undefined : handleSortChange}
