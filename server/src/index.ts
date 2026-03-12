@@ -17,6 +17,8 @@ import scanSessionsRouter from './routes/scan-sessions';
 import { agenciesRouter, bureausRouter } from './routes/agencies';
 import reportRouter from './routes/report';
 import mcpRouter from './routes/mcp';
+import schedulerRouter from './routes/scheduler';
+import { setupScheduler, shutdown as shutdownScheduler } from './scheduler';
 import { validateUrlForSsrf } from './middleware/ssrf-protection';
 
 const app = express();
@@ -39,10 +41,28 @@ async function main() {
   // middleware/routes in order at request time, so everything registered below
   // still takes full effect — we're just ensuring the port is open early so
   // VIP's health probe doesn't time out while the schema migration runs.
-  await new Promise<void>((resolve, reject) => {
-    app.listen(config.port, () => resolve()).on('error', reject);
+  const server = await new Promise<import('http').Server>((resolve, reject) => {
+    const s = app.listen(config.port, () => resolve(s)).on('error', reject);
   });
   console.log(`✓ Server listening at http://localhost:${config.port}`);
+
+  // Graceful shutdown — VIP sends SIGTERM before replacing the container.
+  // Stop scheduler jobs, drain in-flight requests, then exit cleanly.
+  const gracefulShutdown = (signal: string) => {
+    console.log(`[shutdown] ${signal} received — shutting down gracefully`);
+    shutdownScheduler();
+    server.close(() => {
+      console.log('[shutdown] HTTP server closed');
+      process.exit(0);
+    });
+    // Force exit if drain takes too long (VIP typically allows ~30 s)
+    setTimeout(() => {
+      console.error('[shutdown] Forced exit after timeout');
+      process.exit(1);
+    }, 25_000).unref();
+  };
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 
   // ---------------------------------------------------------------------------
   // 2. Initialize DB — runs after server is already accepting health checks.
@@ -71,6 +91,7 @@ async function main() {
     }
   }
 
+  // ---------------------------------------------------------------------------
   // Load any settings previously saved via the UI into the live config object.
   // This ensures keys saved in a previous session are available without a .env edit.
   // (.env values take precedence — only apply DB value if .env didn't already set it.)
@@ -125,6 +146,7 @@ async function main() {
   app.use('/api/v1/agencies',       agenciesRouter);
   app.use('/api/v1/bureaus',        bureausRouter);
   app.use('/api/v1/report',         reportRouter);
+  app.use('/api/v1/scheduler',      schedulerRouter);
   app.use('/mcp',                   mcpRouter);
 
   // Settings endpoint (simple key/value store)
@@ -283,6 +305,11 @@ async function main() {
   // ---------------------------------------------------------------------------
   // 6. Ready
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // 7b. Scheduler — start background jobs after routes are registered
+  // ---------------------------------------------------------------------------
+  await setupScheduler();
+
   console.log(`  - Glean: ${config.gleanEndpoint ? '✓ configured' : '✗ not configured'}`);
   console.log(`  - GSA API: ${config.gsaApiKey ? '✓ configured' : '✗ not configured'}`);
   console.log('✓ Startup complete — all routes active');

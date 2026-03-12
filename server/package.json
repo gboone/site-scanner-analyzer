@@ -12,11 +12,13 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@xmldom/xmldom": "^0.8.11",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.0",
     "express": "^4.21.2",
     "ipaddr.js": "^2.2.0",
     "mysql2": "^3.9.0",
+    "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
     "shared": "*",
     "typescript": "^5.4.5",
@@ -26,6 +28,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.1",
+    "@types/node-cron": "^3.0.11",
     "drizzle-kit": "^0.30.4",
     "tsx": "4.7.3"
   }

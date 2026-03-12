@@ -1,5 +1,5 @@
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 
 function SettingField({
@@ -62,7 +62,22 @@ function SettingField({
   );
 }
 
+const INTERVAL_LABELS: Record<string, string> = {
+  '6h': 'Every 6 hours',
+  '12h': 'Every 12 hours',
+  '24h': 'Daily (2 AM)',
+  '48h': 'Every 2 days',
+  'weekly': 'Weekly (Sunday 2 AM)',
+};
+
+const FILTER_LABELS: Record<string, string> = {
+  all: 'All sites',
+  public: 'Public only (not excluded)',
+  live: 'Live sites only',
+};
+
 export default function SettingsView() {
+  const queryClient = useQueryClient();
   const { data: settings = {} } = useQuery({
     queryKey: ['settings'],
     queryFn: () => api.getSettings(),
@@ -76,6 +91,33 @@ export default function SettingsView() {
   const [gsaImportStatus, setGsaImportStatus] = React.useState<string | null>(null);
   const [gsaImportErrors, setGsaImportErrors] = React.useState<string[]>([]);
   const [gsaImportErrorCount, setGsaImportErrorCount] = React.useState(0);
+
+  // Scheduler state
+  const { data: schedulerData, refetch: refetchScheduler } = useQuery({
+    queryKey: ['scheduler-status'],
+    queryFn: () => api.getSchedulerStatus(),
+  });
+  const [gsaSched, setGsaSched] = React.useState({ enabled: false, interval: '24h', agency: '' });
+  const [scanSched, setScanSched] = React.useState({ enabled: false, interval: '24h', filter: 'all' });
+  const [schedSaving, setSchedSaving] = React.useState(false);
+  const [gsaRunStatus, setGsaRunStatus] = React.useState<string | null>(null);
+  const [scanRunStatus, setScanRunStatus] = React.useState<string | null>(null);
+
+  // Sync scheduler form state when data loads
+  React.useEffect(() => {
+    if (schedulerData) {
+      setGsaSched({
+        enabled: schedulerData.gsa.enabled,
+        interval: schedulerData.gsa.interval || '24h',
+        agency: schedulerData.gsa.agency || '',
+      });
+      setScanSched({
+        enabled: schedulerData.scan.enabled,
+        interval: schedulerData.scan.interval || '24h',
+        filter: schedulerData.scan.filter || 'all',
+      });
+    }
+  }, [schedulerData]);
 
   const handleSave = async (key: string, value: string) => {
     await api.setSetting(key, value);
@@ -127,8 +169,44 @@ export default function SettingsView() {
     }
   };
 
+  const saveScheduler = async () => {
+    setSchedSaving(true);
+    try {
+      await api.updateGsaSchedule({ enabled: gsaSched.enabled, interval: gsaSched.interval, agency: gsaSched.agency || undefined });
+      await api.updateScanSchedule({ enabled: scanSched.enabled, interval: scanSched.interval, filter: scanSched.filter });
+      await refetchScheduler();
+    } catch (err: any) {
+      alert(`Failed to save: ${err.message}`);
+    } finally {
+      setSchedSaving(false);
+    }
+  };
+
+  const triggerGsa = async () => {
+    setGsaRunStatus('Triggering…');
+    try {
+      await api.triggerGsaRefresh();
+      setGsaRunStatus('Triggered — check server logs for progress');
+      setTimeout(() => { refetchScheduler(); }, 3000);
+    } catch (err: any) {
+      setGsaRunStatus(`✗ ${err.message}`);
+    }
+  };
+
+  const triggerScan = async () => {
+    setScanRunStatus('Triggering…');
+    try {
+      await api.triggerSiteRescan();
+      setScanRunStatus('Triggered — check Scan Sessions for progress');
+      setTimeout(() => { refetchScheduler(); }, 3000);
+    } catch (err: any) {
+      setScanRunStatus(`✗ ${err.message}`);
+    }
+  };
+
   return (
-    <div className="p-6 max-w-2xl overflow-auto">
+    <div className="overflow-y-auto h-full">
+      <div className="p-6 max-w-2xl">
       <h1 className="text-xl font-bold text-gray-900 mb-2">Settings</h1>
       <p className="text-sm text-gray-500 mb-6">
         API keys are stored in the <code className="bg-gray-100 px-1 rounded">.env</code> file at the project root.
@@ -234,6 +312,151 @@ export default function SettingsView() {
           onSave={(v) => handleSave('ANTHROPIC_API_KEY', v)}
           type="password"
         />
+      </div>
+
+      {/* Scheduled Jobs */}
+      <div className="bg-white rounded-lg border border-gray-200 px-4 mt-6">
+        <div className="py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100">
+          Scheduled Jobs
+        </div>
+        <p className="text-xs text-gray-500 mt-3 mb-1">
+          Automated background tasks that run server-side on a configurable interval — no browser session needed.
+        </p>
+
+        {/* GSA Refresh */}
+        <div className="py-4 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-sm font-medium text-gray-800">GSA Data Refresh</div>
+              <div className="text-xs text-gray-500 mt-0.5">Pull fresh site records from the GSA Site Scanner API</div>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <span className="text-xs text-gray-500">{gsaSched.enabled ? 'Enabled' : 'Disabled'}</span>
+              <div
+                role="switch"
+                aria-checked={gsaSched.enabled}
+                onClick={() => setGsaSched(p => ({ ...p, enabled: !p.enabled }))}
+                className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer ${gsaSched.enabled ? 'bg-gov-blue' : 'bg-gray-200'}`}
+              >
+                <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${gsaSched.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </div>
+            </label>
+          </div>
+          <div className="flex gap-3 items-end">
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">Interval</label>
+              <select
+                value={gsaSched.interval}
+                onChange={e => setGsaSched(p => ({ ...p, interval: e.target.value }))}
+                disabled={!gsaSched.enabled}
+                className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gov-blue disabled:opacity-40"
+              >
+                {Object.entries(INTERVAL_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">Agency filter (optional)</label>
+              <input
+                type="text"
+                value={gsaSched.agency}
+                onChange={e => setGsaSched(p => ({ ...p, agency: e.target.value }))}
+                placeholder="e.g. Department of Veterans Affairs"
+                disabled={!gsaSched.enabled}
+                className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gov-blue disabled:opacity-40"
+              />
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <button onClick={triggerGsa} className="btn-secondary text-xs">Run now</button>
+            {gsaRunStatus && <span className="text-xs text-gray-500">{gsaRunStatus}</span>}
+          </div>
+          {schedulerData?.gsa.last_run && (
+            <div className="mt-2 text-xs text-gray-400">
+              Last run: {new Date(schedulerData.gsa.last_run).toLocaleString()}
+              {schedulerData.gsa.last_status && (
+                <span className={`ml-2 ${schedulerData.gsa.last_status.startsWith('ok') ? 'text-green-600' : 'text-red-500'}`}>
+                  — {schedulerData.gsa.last_status}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Site Rescan */}
+        <div className="py-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-sm font-medium text-gray-800">Site Rescan</div>
+              <div className="text-xs text-gray-500 mt-0.5">Re-scan all (or filtered) sites in the database</div>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <span className="text-xs text-gray-500">{scanSched.enabled ? 'Enabled' : 'Disabled'}</span>
+              <div
+                role="switch"
+                aria-checked={scanSched.enabled}
+                onClick={() => setScanSched(p => ({ ...p, enabled: !p.enabled }))}
+                className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer ${scanSched.enabled ? 'bg-gov-blue' : 'bg-gray-200'}`}
+              >
+                <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${scanSched.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </div>
+            </label>
+          </div>
+          <div className="flex gap-3 items-end">
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">Interval</label>
+              <select
+                value={scanSched.interval}
+                onChange={e => setScanSched(p => ({ ...p, interval: e.target.value }))}
+                disabled={!scanSched.enabled}
+                className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gov-blue disabled:opacity-40"
+              >
+                {Object.entries(INTERVAL_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">Sites to scan</label>
+              <select
+                value={scanSched.filter}
+                onChange={e => setScanSched(p => ({ ...p, filter: e.target.value }))}
+                disabled={!scanSched.enabled}
+                className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gov-blue disabled:opacity-40"
+              >
+                {Object.entries(FILTER_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <button onClick={triggerScan} className="btn-secondary text-xs">Run now</button>
+            {scanRunStatus && <span className="text-xs text-gray-500">{scanRunStatus}</span>}
+          </div>
+          {schedulerData?.scan.last_run && (
+            <div className="mt-2 text-xs text-gray-400">
+              Last run: {new Date(schedulerData.scan.last_run).toLocaleString()}
+              {schedulerData.scan.last_status && (
+                <span className={`ml-2 ${schedulerData.scan.last_status.startsWith('ok') ? 'text-green-600' : 'text-red-500'}`}>
+                  — {schedulerData.scan.last_status}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="py-3 border-t border-gray-100 flex justify-end">
+          <button
+            onClick={saveScheduler}
+            disabled={schedSaving}
+            className="btn-primary text-xs disabled:opacity-50"
+          >
+            {schedSaving ? 'Saving…' : 'Save schedule'}
+          </button>
+        </div>
+      </div>
       </div>
     </div>
   );
