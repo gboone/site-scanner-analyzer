@@ -61,19 +61,18 @@ function splitCsvLine(line: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Upsert SQL — minimal: only fill gaps or overwrite domain_type on conflict
+// Upsert SQL — minimal: only fill gaps or overwrite branch on conflict
 // ---------------------------------------------------------------------------
 const UPSERT_SQL = `
-  INSERT INTO sites (domain, domain_type, city, state, security_contact_email, name, agency, imported_at, updated_at)
-  VALUES (:domain, :domain_type, :city, :state, :security_contact_email, :name, :agency, :imported_at, :updated_at)
+  INSERT INTO sites (domain, branch, city, state, agency, bureau, imported_at, updated_at)
+  VALUES (:domain, :branch, :city, :state, :agency, :bureau, :imported_at, :updated_at)
   ON DUPLICATE KEY UPDATE
-    domain_type            = VALUES(domain_type),
-    updated_at             = VALUES(updated_at),
-    city                   = COALESCE(city, VALUES(city)),
-    state                  = COALESCE(state, VALUES(state)),
-    security_contact_email = COALESCE(security_contact_email, VALUES(security_contact_email)),
-    name                   = COALESCE(name, VALUES(name)),
-    agency                 = COALESCE(agency, VALUES(agency))
+    branch     = VALUES(branch),
+    updated_at = VALUES(updated_at),
+    city       = COALESCE(city, VALUES(city)),
+    state      = COALESCE(state, VALUES(state)),
+    agency     = COALESCE(agency, VALUES(agency)),
+    bureau     = COALESCE(bureau, VALUES(bureau))
 `;
 
 // ---------------------------------------------------------------------------
@@ -137,14 +136,13 @@ export async function importFromGetGov(
         isFederal: isFederalType(domainType),
         row: {
           domain,
-          domain_type:            domainType || null,
-          city:                   csv['City']?.trim() || null,
-          state:                  csv['State']?.trim() || null,
-          security_contact_email: csv['Security contact email']?.trim() || null,
-          name:                   csv['Organization name']?.trim() || null,
-          agency:                 csv['Suborganization name']?.trim() || null,
-          imported_at:            now,
-          updated_at:             now,
+          branch:      domainType || null,
+          city:        csv['City']?.trim() || null,
+          state:       csv['State']?.trim() || null,
+          agency:      csv['Organization name']?.trim() || null,
+          bureau:      csv['Suborganization name']?.trim() || null,
+          imported_at: now,
+          updated_at:  now,
         },
       });
     }
@@ -221,18 +219,18 @@ async function discoverAndEnqueueSubdomains(domains: string[]): Promise<void> {
       if (result.status !== 'fulfilled' || result.value.length === 0) continue;
 
       const parentDomain = batch[j];
-      const parentRows = await query<{ domain_type: string }>(
-        'SELECT domain_type FROM sites WHERE domain = ? LIMIT 1',
+      const parentRows = await query<{ branch: string }>(
+        'SELECT branch FROM sites WHERE domain = ? LIMIT 1',
         [parentDomain]
       );
-      const domainType = parentRows[0]?.domain_type ?? null;
+      const branch = parentRows[0]?.branch ?? null;
       const now = new Date().toISOString();
 
       for (const sub of result.value) {
         try {
           await execute(
-            'INSERT IGNORE INTO sites (domain, domain_type, imported_at, updated_at) VALUES (?, ?, ?, ?)',
-            [sub, domainType, now, now]
+            'INSERT IGNORE INTO sites (domain, branch, imported_at, updated_at) VALUES (?, ?, ?, ?)',
+            [sub, branch, now, now]
           );
           subdomainJobs.push({ domain: sub, url: `https://${sub}` });
         } catch {

@@ -359,14 +359,11 @@ export async function initDb(): Promise<void> {
   await addCol('excluded', 'INTEGER');
 
   // get.gov registry fields
-  await addCol('domain_type', 'VARCHAR(50)');
   await addCol('city', 'VARCHAR(100)');
   await addCol('state', 'VARCHAR(2)');
-  await addCol('security_contact_email', 'TEXT');
 
-  await createIndex('idx_sites_domain_type', 'sites', 'domain_type');
-  await createIndex('idx_sites_state',       'sites', 'state');
-  await createIndex('idx_sites_city',        'sites', 'city', 100);
+  await createIndex('idx_sites_state', 'sites', 'state');
+  await createIndex('idx_sites_city',  'sites', 'city', 100);
 
   // Clean up any null-domain rows from old broken imports
   const [deleted] = await pool.query('DELETE FROM sites WHERE domain IS NULL') as any;

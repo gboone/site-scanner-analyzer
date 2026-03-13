@@ -36,7 +36,7 @@ const COLUMNS: ColumnDef<Record<string, unknown>, any>[] = [
     cell: (c) => <span className="text-gray-700 truncate">{String(c.getValue() || '—')}</span>,
   },
   {
-    accessorKey: 'domain_type',
+    accessorKey: 'branch',
     header: 'Type',
     size: 110,
     cell: (c) => {
@@ -192,7 +192,7 @@ export default function ExplorerView({ onNavigate }: Props) {
     ...filters,
     ...(agencyFilter ? { agency: agencyFilter } : {}),
     ...(bureauFilter ? { bureau: bureauFilter } : {}),
-    ...(domainTypeFilter ? { domain_type: domainTypeFilter } : {}),
+    ...(domainTypeFilter ? { branch: domainTypeFilter } : {}),
     ...(stateFilter ? { state: stateFilter } : {}),
   };
   const { data, isLoading } = useSites(queryParams);
