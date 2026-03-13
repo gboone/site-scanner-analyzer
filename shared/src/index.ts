@@ -130,6 +130,10 @@ export interface SiteRecord {
   // Local tracking (added on import)
   imported_at?: string;
   updated_at?: string;
+  /** Manual exclusion flag — 1 hides site from Explorer and public views */
+  excluded?: number | null;
+  /** Computed during rescan: 1 = public-facing, 0 = internal/non-prod, null = not yet evaluated */
+  is_public?: number | null;
 }
 
 // ─── Scan result types ─────────────────────────────────────────────────────
@@ -264,6 +268,8 @@ export interface TechStackResult {
   hsts: boolean;
   /** True when the fetched page appears to be a login/auth gate rather than public content */
   login_gate: boolean;
+  /** Raw page title extracted from <title> tag; null on fetch failure */
+  title: string | null;
 }
 
 export interface DnsResult {

@@ -89,6 +89,62 @@ async function runScan(url: string): Promise<ScanResult> {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Public-site classifier — JS mirror of PUBLIC_ONLY_CONDITION in publicFilter.ts
+// ---------------------------------------------------------------------------
+
+const NON_PROD_PREFIXES = [
+  'staging.', 'uat.', 'test.', 'dev.', 'demo.', 'qa.', 'stg.',
+  'sit.', 'preprod.', 'pre-prod.', 'sandbox.', 'training.',
+  'www-test.', 'www-dev.', 'www-stg.',
+];
+const NON_PROD_INFIX = [
+  '.staging.', '.uat.', '.test.', '.dev.', '.demo.', '.qa.', '.stg.',
+  '-staging.', '-uat.', '-test.', '-dev.', '-demo.',
+];
+const VPN_PREFIXES = [
+  'vpn.', 'vpngateway.', 'webvpn.', 'sslvpn.', 'remote.', 'citrix.',
+  'pulse.', 'anyconnect.', 'connect.', 'access.',
+];
+const VPN_INFIX = ['.vpn.', '-vpn.'];
+const BAD_TITLE_PATTERNS = [
+  'login', 'log in', 'sign in', 'sign-in', 'request rejected', 'access denied',
+  'unauthorized', 'default website', 'welcome to iis', 'welcome to default',
+  'outlook', 'webmail', 'forbidden', 'page not found',
+  'it security', 'authorized users only', 'computer fraud',
+  'information systems security', 'max.gov', 'max portal', 'maxportal',
+  'max auth', 'maxauth', 'omb max',
+  'gitlab', 'gitea', 'gogs', 'sign in · git',
+  'vpn', 'anyconnect', 'ssl vpn', 'webvpn', 'citrix',
+  'pulse secure', 'globalprotect', 'remote access', 'juniper network',
+];
+
+function computeIsPublic(domain: string, scan: ScanResult): 0 | 1 {
+  const rc = scan.redirect_chain as any;
+  const ts = scan.tech_stack as any;
+
+  const isRedirect = rc?.was_redirected === true;
+  const isLive     = scan.live === true;
+  const statusCode = Array.isArray(rc?.hops) && rc.hops.length > 0
+    ? rc.hops[rc.hops.length - 1]?.status_code ?? null
+    : null;
+  const isLogin    = ts?.login_gate === true;
+  const title      = (ts?.title ?? '').toLowerCase();
+
+  if (!isLive || isRedirect) return 0;
+  if (statusCode !== null && statusCode !== 200) return 0;
+  if (isLogin) return 0;
+
+  const d = domain.toLowerCase();
+  if (NON_PROD_PREFIXES.some(p => d.startsWith(p))) return 0;
+  if (NON_PROD_INFIX.some(p => d.includes(p))) return 0;
+  if (VPN_PREFIXES.some(p => d.startsWith(p))) return 0;
+  if (VPN_INFIX.some(p => d.includes(p))) return 0;
+  if (title && BAD_TITLE_PATTERNS.some(p => title.includes(p))) return 0;
+
+  return 1;
+}
+
 const BOT_CHALLENGE_TITLE_PATTERNS = [
   'checking your browser', 'just a moment', 'attention required',
   'please wait while we check', 'ddos protection', 'security check',
@@ -251,6 +307,7 @@ export async function scanAndStore(domain: string, url: string): Promise<{ scan_
     }
   }
 
+  updates.is_public = computeIsPublic(domain, scan_result);
   updates.last_scan_id = scan_id;
   const cols = Object.keys(updates).filter(k => k !== 'domain');
   const setClause = cols.map(k => `\`${k}\` = :${k}`).join(', ');

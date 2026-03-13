@@ -147,6 +147,7 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
   const scopeLabel = reportConfig.label
     ?? (reportConfig.scope === 'sql' ? 'SQL query results' : 'Selected sites');
   const total = stats?.total_sites ?? domains.length;
+  const showDapUswds = !stats?.by_branch?.length || stats.by_branch.some((b) => b.branch?.includes('Executive'));
 
   function SortIcon({ col }: { col: SortKey }) {
     if (sortKey !== col) return <span className="text-gray-300 ml-1">↕</span>;
@@ -224,7 +225,7 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
         {stats && (
           <section aria-label="Summary stats">
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Summary</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className={`grid grid-cols-2 sm:grid-cols-3 ${showDapUswds ? 'lg:grid-cols-6' : 'lg:grid-cols-4'} gap-3`}>
               <StatTile label="Total" value={total} />
               <StatTile
                 label="Live"
@@ -238,16 +239,20 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
                 sub={`${stats.https_enforced_count} sites`}
                 good={stats.https_enforced_pct >= 90}
               />
-              <StatTile
-                label="USWDS"
-                value={pct(stats.uswds_any_count, total)}
-                sub={`${stats.uswds_any_count} sites`}
-              />
-              <StatTile
-                label="DAP"
-                value={pct(stats.dap_count, total)}
-                sub={`${stats.dap_count} sites`}
-              />
+              {showDapUswds && (
+                <StatTile
+                  label="USWDS"
+                  value={pct(stats.uswds_any_count, total)}
+                  sub={`${stats.uswds_any_count} sites`}
+                />
+              )}
+              {showDapUswds && (
+                <StatTile
+                  label="DAP"
+                  value={pct(stats.dap_count, total)}
+                  sub={`${stats.dap_count} sites`}
+                />
+              )}
               <StatTile
                 label="Sitemap"
                 value={pct(stats.sitemap_detected_count, total)}
@@ -261,7 +266,7 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
         {stats && (
           <section aria-label="Charts">
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Breakdown</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className={`grid grid-cols-1 ${showDapUswds ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4`}>
 
               {/* HTTPS donut */}
               <div className="bg-white border border-gray-200 rounded-lg p-4">
@@ -279,19 +284,21 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
               </div>
 
               {/* USWDS donut */}
-              <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">USWDS Adoption</h3>
-                <ResponsiveContainer width="100%" height={180}>
-                  <PieChart>
-                    <Pie data={uswdsData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40}>
-                      <Cell fill="#3b82f6" />
-                      <Cell fill="#e5e7eb" />
-                    </Pie>
-                    <Tooltip formatter={(v) => [v, '']} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
+              {showDapUswds && (
+                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">USWDS Adoption</h3>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={uswdsData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40}>
+                        <Cell fill="#3b82f6" />
+                        <Cell fill="#e5e7eb" />
+                      </Pie>
+                      <Tooltip formatter={(v) => [v, '']} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
 
               {/* CMS bar */}
               <div className="bg-white border border-gray-200 rounded-lg p-4">
@@ -333,8 +340,8 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
                     <Th col="redirect">Redirects</Th>
                     <Th col="https">HTTPS</Th>
                     <Th col="hsts">HSTS</Th>
-                    <Th col="uswds">USWDS</Th>
-                    <Th col="dap">DAP</Th>
+                    {showDapUswds && <Th col="uswds">USWDS</Th>}
+                    {showDapUswds && <Th col="dap">DAP</Th>}
                     <Th col="sitemap">Sitemap</Th>
                     <Th col="cms">CMS</Th>
                     <Th col="scan_date">Last Scan</Th>
@@ -367,10 +374,14 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
                       </td>
                       <td className="px-3 py-2"><BoolCell v={site.https_enforced} /></td>
                       <td className="px-3 py-2"><BoolCell v={site.hsts} /></td>
-                      <td className="px-3 py-2 text-xs font-mono">
-                        {site.uswds_count != null ? String(site.uswds_count) : '—'}
-                      </td>
-                      <td className="px-3 py-2"><BoolCell v={site.dap} /></td>
+                      {showDapUswds && (
+                        <td className="px-3 py-2 text-xs font-mono">
+                          {site.uswds_count != null ? String(site.uswds_count) : '—'}
+                        </td>
+                      )}
+                      {showDapUswds && (
+                        <td className="px-3 py-2"><BoolCell v={site.dap} /></td>
+                      )}
                       <td className="px-3 py-2"><BoolCell v={site.sitemap_xml_detected} /></td>
                       <td className="px-3 py-2 text-xs text-gray-600">
                         {site.cms ? String(site.cms) : '—'}
@@ -384,7 +395,7 @@ export default function MultiSiteReportView({ onNavigate }: Props) {
                   ))}
                   {sites.length === 0 && allLoaded && (
                     <tr>
-                      <td colSpan={10} className="px-3 py-8 text-center text-gray-400 text-sm">
+                      <td colSpan={showDapUswds ? 10 : 8} className="px-3 py-8 text-center text-gray-400 text-sm">
                         No site data available.
                       </td>
                     </tr>

@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import type { PoolConnection } from 'mysql2/promise';
+import { PUBLIC_ONLY_CONDITION } from '../utils/publicFilter';
 
 // Parse host and port from VIP_MARIADB_WRITE_HOSTS ("127.0.0.1:3306")
 function parseWriteHost(hosts?: string): { host: string; port: number } {
@@ -357,13 +358,21 @@ export async function initDb(): Promise<void> {
   await addCol('security_header_csp');
   await addCol('security_header_xss');
   await addCol('excluded', 'INTEGER');
+  await addCol('is_public', 'INTEGER');
 
   // get.gov registry fields
   await addCol('city', 'VARCHAR(100)');
   await addCol('state', 'VARCHAR(2)');
 
-  await createIndex('idx_sites_state', 'sites', 'state');
-  await createIndex('idx_sites_city',  'sites', 'city', 100);
+  await createIndex('idx_sites_state',     'sites', 'state');
+  await createIndex('idx_sites_city',      'sites', 'city', 100);
+  await createIndex('idx_sites_is_public', 'sites', 'is_public');
+
+  // Backfill is_public for rows not yet rescanned.
+  // Uses PUBLIC_ONLY_CONDITION so existing domain/title data is respected.
+  // Only touches NULL rows — idempotent after first startup.
+  await pool.query(`UPDATE sites SET is_public = 1 WHERE is_public IS NULL AND ${PUBLIC_ONLY_CONDITION}`);
+  await pool.query(`UPDATE sites SET is_public = 0 WHERE is_public IS NULL`);
 
   // Clean up any null-domain rows from old broken imports
   const [deleted] = await pool.query('DELETE FROM sites WHERE domain IS NULL') as any;

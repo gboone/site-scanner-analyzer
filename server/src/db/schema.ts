@@ -132,6 +132,10 @@ export const sites = mysqlTable('sites', {
   // Manual exclusion — set to 1 to hide from Explorer and public views
   // Migration: ALTER TABLE sites ADD COLUMN excluded INT DEFAULT 0;
   excluded: int('excluded').default(0),
+  // Computed during rescan: 1 = public-facing, 0 = internal/non-prod, NULL = not yet evaluated.
+  // Mirrors PUBLIC_ONLY_CONDITION logic but stored for fast indexed lookups.
+  // Orthogonal to `excluded` — combine as: is_public = 1 AND excluded = 0
+  is_public: int('is_public'),
 }, (table) => ({
   agencyIdx: index('idx_sites_agency').on(table.agency),
   bureauIdx: index('idx_sites_bureau').on(table.bureau),
@@ -139,6 +143,7 @@ export const sites = mysqlTable('sites', {
   uswdsIdx: index('idx_sites_uswds').on(table.uswds_count),
   dapIdx: index('idx_sites_dap').on(table.dap),
   sitemapIdx: index('idx_sites_sitemap').on(table.sitemap_xml_detected),
+  isPublicIdx: index('idx_sites_is_public').on(table.is_public),
 }));
 
 export const scan_history = mysqlTable('scan_history', {
