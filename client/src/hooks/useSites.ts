@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { PaginatedResponse } from 'shared';
 
@@ -32,17 +32,6 @@ export function useStats(filter?: { agency?: string; bureau?: string; domains?: 
     queryFn: () => api.getStats(filter) as any,
     staleTime: 5 * 60 * 1000, // 5 minutes — server sets Cache-Control: private, max-age=300
     retry: 1,                  // fail fast so the error state surfaces quickly
-  });
-}
-
-export function useImport() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (sites: unknown[]) => api.importSites(sites) as any,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sites'] });
-      qc.invalidateQueries({ queryKey: ['stats'] });
-    },
   });
 }
 

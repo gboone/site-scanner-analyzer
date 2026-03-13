@@ -5,6 +5,7 @@ import {
   reconfigure,
   runGsaRefresh,
   runSiteRescan,
+  runGetGovRefresh,
   type ScheduleInterval,
   type ScanFilter,
 } from '../scheduler';
@@ -109,6 +110,43 @@ router.post('/scan/run', async (_req: Request, res: Response) => {
   // Respond immediately; job runs in the background
   res.json({ ok: true, message: 'Site rescan triggered' });
   runSiteRescan().catch(console.error);
+});
+
+// PUT /api/v1/scheduler/getgov — update get.gov refresh job config
+router.put('/getgov', async (req: Request, res: Response) => {
+  const { enabled, interval } = req.body as {
+    enabled?: boolean;
+    interval?: string;
+  };
+
+  if (interval !== undefined && !VALID_INTERVALS.has(interval as ScheduleInterval)) {
+    res.status(400).json({ error: `Invalid interval. Valid values: ${[...VALID_INTERVALS].join(', ')}` });
+    return;
+  }
+
+  const updates: Record<string, string> = {};
+  if (enabled !== undefined) updates['SCHEDULER_GETGOV_ENABLED'] = String(enabled);
+  if (interval !== undefined) updates['SCHEDULER_GETGOV_INTERVAL'] = interval;
+
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ error: 'No fields to update' });
+    return;
+  }
+
+  try {
+    await saveSettings(updates);
+    await reconfigure();
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/v1/scheduler/getgov/run — trigger get.gov refresh immediately
+router.post('/getgov/run', async (_req: Request, res: Response) => {
+  // Respond immediately; job runs in the background
+  res.json({ ok: true, message: 'get.gov refresh triggered' });
+  runGetGovRefresh().catch(console.error);
 });
 
 export default router;

@@ -358,6 +358,13 @@ export async function initDb(): Promise<void> {
   await addCol('security_header_xss');
   await addCol('excluded', 'INTEGER');
 
+  // get.gov registry fields
+  await addCol('city', 'VARCHAR(100)');
+  await addCol('state', 'VARCHAR(2)');
+
+  await createIndex('idx_sites_state', 'sites', 'state');
+  await createIndex('idx_sites_city',  'sites', 'city', 100);
+
   // Clean up any null-domain rows from old broken imports
   const [deleted] = await pool.query('DELETE FROM sites WHERE domain IS NULL') as any;
   if ((deleted.affectedRows ?? 0) > 0) {

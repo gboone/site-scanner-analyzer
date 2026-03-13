@@ -1,11 +1,11 @@
 import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import { DataTable, type Table } from '../components/data-table/DataTable';
 import FilterChips from '../components/data-table/FilterChips';
 import ColumnToggle from '../components/data-table/ColumnToggle';
 import Pagination from '../components/data-table/Pagination';
 import SiteDetail from '../components/site-detail/SiteDetail';
-import { DomainImportModal } from '../components/import/DomainImportModal';
 import AgencyBureauFilter from '../components/AgencyBureauFilter';
 import { useSites, useScanSessions } from '../hooks/useSites';
 import { useHiddenSites } from '../hooks/useHiddenSites';
@@ -33,6 +33,27 @@ const COLUMNS: ColumnDef<Record<string, unknown>, any>[] = [
     header: 'Agency',
     size: 180,
     cell: (c) => <span className="text-gray-700 truncate">{String(c.getValue() || '—')}</span>,
+  },
+  {
+    accessorKey: 'branch',
+    header: 'Type',
+    size: 110,
+    cell: (c) => {
+      const v = String(c.getValue() || '');
+      if (!v) return <span className="text-gray-300 text-xs">—</span>;
+      // Values include "Federal - Executive", "City - Election", "State or territory", etc.
+      const badgeCls = v.startsWith('Federal') ? 'badge-blue'
+        : v.startsWith('State') ? 'badge-green'
+        : v.startsWith('Tribal') ? 'badge-yellow'
+        : 'badge-gray';
+      return <span className={`badge ${badgeCls} text-xs`}>{v}</span>;
+    },
+  },
+  {
+    accessorKey: 'state',
+    header: 'State',
+    size: 55,
+    cell: (c) => <span className="text-gray-500 font-mono text-xs">{String(c.getValue() || '—')}</span>,
   },
   {
     accessorKey: 'live',
@@ -139,7 +160,6 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [order, setOrder] = React.useState('asc');
   const [filters, setFilters] = React.useState<Record<string, string>>({});
   const [tableInstance, setTableInstance] = React.useState<Table<any> | null>(null);
-  const [importOpen, setImportOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [groupByFinalDomain, setGroupByFinalDomain] = React.useState(false);
 
@@ -155,6 +175,11 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [agencyFilter, setAgencyFilter] = React.useState('');
   const [bureauFilter, setBureauFilter] = React.useState('');
 
+  // get.gov jurisdiction / location filters
+  const [domainTypeFilter, setDomainTypeFilter] = React.useState('');
+  const [stateFilter, setStateFilter] = React.useState('');
+  const { data: domainTypes = [] } = useQuery({ queryKey: ['domain-types'], queryFn: () => api.getDomainTypes() });
+
   // Overfetch to compensate for client-side hidden rows, capped at 100 total
   const fetchLimit = filters.show_hidden === 'true' ? 25 : Math.min(25 + hidden.size, 100);
 
@@ -165,6 +190,8 @@ export default function ExplorerView({ onNavigate }: Props) {
     ...filters,
     ...(agencyFilter ? { agency: agencyFilter } : {}),
     ...(bureauFilter ? { bureau: bureauFilter } : {}),
+    ...(domainTypeFilter ? { branch: domainTypeFilter } : {}),
+    ...(stateFilter ? { state: stateFilter } : {}),
   };
   const { data, isLoading } = useSites(queryParams);
 
@@ -257,7 +284,7 @@ export default function ExplorerView({ onNavigate }: Props) {
 
   const clearSelection = () => setSelectedDomains(new Set());
 
-  /** Fetch ALL matching rows (up to 1000) and bulk-select them */
+  /** Fetch ALL matching rows (up to 2500) and bulk-select them */
   const selectAllMatching = async () => {
     setSelectAllLoading(true);
     try {
@@ -266,7 +293,7 @@ export default function ExplorerView({ onNavigate }: Props) {
         ...(agencyFilter ? { agency: agencyFilter } : {}),
         ...(bureauFilter ? { bureau: bureauFilter } : {}),
         page: 1,
-        limit: 1000,
+        limit: 2500,
         sort,
         order,
       }) as any;
@@ -380,13 +407,6 @@ export default function ExplorerView({ onNavigate }: Props) {
             >
               Group by redirect target
             </button>
-            <button
-              onClick={() => setImportOpen(true)}
-              className="btn-secondary text-xs py-0.5 px-2"
-              title="Add domains by pasting or dropping a text file"
-            >
-              + Add domains
-            </button>
             <ColumnToggle table={tableInstance} />
           </div>
         </div>
@@ -410,9 +430,29 @@ export default function ExplorerView({ onNavigate }: Props) {
               {[agencyFilter, bureauFilter].filter(Boolean).join(' › ')}
             </span>
           )}
+          {domainTypes.length > 0 && (
+            <select
+              value={domainTypeFilter}
+              onChange={(e) => { setDomainTypeFilter(e.target.value); setPage(1); }}
+              className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 shrink-0"
+              aria-label="Filter by government type"
+            >
+              <option value="">All types</option>
+              {domainTypes.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          )}
+          <input
+            type="text"
+            value={stateFilter}
+            onChange={(e) => { setStateFilter(e.target.value.toUpperCase().slice(0, 2)); setPage(1); }}
+            placeholder="State"
+            maxLength={2}
+            className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-14 shrink-0 font-mono"
+            aria-label="Filter by state"
+          />
         </div>
-
-        <DomainImportModal open={importOpen} onOpenChange={setImportOpen} />
 
         {/* Personal hidden sites banner */}
         {hidden.size > 0 && filters.show_hidden !== 'true' && (

@@ -1,8 +1,9 @@
 /**
  * Scheduled job manager.
- * Reads config from the settings table and runs two background jobs:
- *   1. GSA data refresh  — calls importFromGsa()
- *   2. Site re-scan      — iterates over filtered sites and calls scanAndStore()
+ * Reads config from the settings table and runs three background jobs:
+ *   1. GSA data refresh      — calls importFromGsa()
+ *   2. Site re-scan          — iterates over filtered sites and calls scanAndStore()
+ *   3. get.gov registry sync — calls importFromGetGov()
  *
  * Call setupScheduler() once after DB init. Call reconfigure() whenever
  * scheduler settings change so jobs restart with the new schedule.
@@ -11,6 +12,7 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import { query, execute } from './db';
 import { importFromGsa, type GsaImportResult } from './routes/gsa';
+import { importFromGetGov } from './routes/getgov';
 import { scanAndStore } from './scanner/orchestrator';
 
 // ---------------------------------------------------------------------------
@@ -33,9 +35,15 @@ export interface ScanScheduleConfig {
   filter: ScanFilter;
 }
 
+export interface GetGovScheduleConfig {
+  enabled: boolean;
+  interval: ScheduleInterval;
+}
+
 export interface SchedulerStatus {
   gsa: GsaScheduleConfig & { last_run?: string; last_status?: string };
   scan: ScanScheduleConfig & { last_run?: string; last_status?: string; last_session_id?: string };
+  getgov: GetGovScheduleConfig & { last_run?: string; last_status?: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +77,8 @@ const SCHEDULER_KEYS = [
   'SCHEDULER_SCAN_ENABLED', 'SCHEDULER_SCAN_INTERVAL', 'SCHEDULER_SCAN_FILTER',
   'SCHEDULER_GSA_LAST_RUN', 'SCHEDULER_GSA_LAST_STATUS',
   'SCHEDULER_SCAN_LAST_RUN', 'SCHEDULER_SCAN_LAST_STATUS', 'SCHEDULER_SCAN_LAST_SESSION_ID',
+  'SCHEDULER_GETGOV_ENABLED', 'SCHEDULER_GETGOV_INTERVAL',
+  'SCHEDULER_GETGOV_LAST_RUN', 'SCHEDULER_GETGOV_LAST_STATUS',
 ] as const;
 
 async function readSettings(): Promise<Record<string, string>> {
@@ -96,8 +106,10 @@ async function writeSetting(key: string, value: string): Promise<void> {
 
 let gsaTask: ScheduledTask | null = null;
 let scanTask: ScheduledTask | null = null;
+let getgovTask: ScheduledTask | null = null;
 let scanRunning = false;
 let gsaRunning = false;
+let getgovRunning = false;
 
 // ---------------------------------------------------------------------------
 // GSA refresh job
@@ -132,6 +144,39 @@ export async function runGsaRefresh(): Promise<void> {
     console.error(`[scheduler] GSA refresh failed:`, err.message);
   } finally {
     gsaRunning = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// get.gov registry refresh job
+// ---------------------------------------------------------------------------
+
+export async function runGetGovRefresh(): Promise<void> {
+  if (getgovRunning) {
+    console.log('[scheduler] get.gov refresh already running — skipping');
+    return;
+  }
+  getgovRunning = true;
+  const startTime = new Date().toISOString();
+  console.log(`[scheduler] get.gov refresh started at ${startTime}`);
+  await writeSetting('SCHEDULER_GETGOV_LAST_RUN', startTime);
+
+  try {
+    const result = await importFromGetGov({
+      onProgress: (processed, total) => {
+        console.log(`[scheduler] get.gov refresh: ${processed}/${total} rows`);
+      },
+    });
+
+    const status = `ok: ${result.inserted} inserted, ${result.updated} updated, ${result.new_federal} new federal, ${result.new_nonfederal} new non-federal`;
+    await writeSetting('SCHEDULER_GETGOV_LAST_STATUS', status);
+    console.log(`[scheduler] get.gov refresh complete — ${status}`);
+  } catch (err: any) {
+    const status = `error: ${err.message}`;
+    await writeSetting('SCHEDULER_GETGOV_LAST_STATUS', status).catch(() => {});
+    console.error(`[scheduler] get.gov refresh failed:`, err.message);
+  } finally {
+    getgovRunning = false;
   }
 }
 
@@ -241,6 +286,8 @@ async function buildTasks(): Promise<void> {
   gsaTask = null;
   scanTask?.stop();
   scanTask = null;
+  getgovTask?.stop();
+  getgovTask = null;
 
   const settings = await readSettings();
 
@@ -249,6 +296,9 @@ async function buildTasks(): Promise<void> {
 
   const scanEnabled = settings['SCHEDULER_SCAN_ENABLED'] === 'true';
   const scanInterval = (settings['SCHEDULER_SCAN_INTERVAL'] as ScheduleInterval) || '24h';
+
+  const getgovEnabled = settings['SCHEDULER_GETGOV_ENABLED'] === 'true';
+  const getgovInterval = (settings['SCHEDULER_GETGOV_INTERVAL'] as ScheduleInterval) || '24h';
 
   if (gsaEnabled) {
     const expr = INTERVAL_CRON[gsaInterval];
@@ -264,6 +314,14 @@ async function buildTasks(): Promise<void> {
     console.log(`[scheduler] Site rescan scheduled: ${expr} (every ${scanInterval})`);
   } else {
     console.log('[scheduler] Site rescan: disabled');
+  }
+
+  if (getgovEnabled) {
+    const expr = INTERVAL_CRON[getgovInterval];
+    getgovTask = cron.schedule(expr, () => { runGetGovRefresh().catch(console.error); });
+    console.log(`[scheduler] get.gov refresh scheduled: ${expr} (every ${getgovInterval})`);
+  } else {
+    console.log('[scheduler] get.gov refresh: disabled');
   }
 }
 
@@ -300,6 +358,12 @@ export async function getStatus(): Promise<SchedulerStatus> {
       last_status: settings['SCHEDULER_SCAN_LAST_STATUS'],
       last_session_id: settings['SCHEDULER_SCAN_LAST_SESSION_ID'],
     },
+    getgov: {
+      enabled: settings['SCHEDULER_GETGOV_ENABLED'] === 'true',
+      interval: (settings['SCHEDULER_GETGOV_INTERVAL'] as ScheduleInterval) || '24h',
+      last_run: settings['SCHEDULER_GETGOV_LAST_RUN'],
+      last_status: settings['SCHEDULER_GETGOV_LAST_STATUS'],
+    },
   };
 }
 
@@ -312,7 +376,8 @@ export async function saveSettings(updates: Record<string, string>): Promise<voi
 
 /** Stop all cron tasks. Called during graceful shutdown. */
 export function shutdown(): void {
-  if (gsaTask) { gsaTask.stop(); gsaTask = null; }
-  if (scanTask) { scanTask.stop(); scanTask = null; }
+  if (gsaTask)    { gsaTask.stop();    gsaTask = null; }
+  if (scanTask)   { scanTask.stop();   scanTask = null; }
+  if (getgovTask) { getgovTask.stop(); getgovTask = null; }
   console.log('[scheduler] Jobs stopped.');
 }
