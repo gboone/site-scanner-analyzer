@@ -151,6 +151,7 @@ export default function DashboardView({ onNavigate }: Props) {
 
   const s = stats;
   const total = s.total_sites;
+  const showDapUswds = !s.by_branch?.length || s.by_branch.some((b) => b.branch?.includes('Executive'));
 
   // ── Chart data ───────────────────────────────────────────────────────────
   const bureauUswdsData = (s.by_bureau ?? [])
@@ -225,7 +226,7 @@ export default function DashboardView({ onNavigate }: Props) {
         {/* ── Summary stat tiles ──────────────────────────────────────── */}
         <section aria-label="Summary stats">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Summary</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className={`grid grid-cols-2 sm:grid-cols-3 ${showDapUswds ? 'lg:grid-cols-6' : 'lg:grid-cols-4'} gap-3`}>
             <StatTile label="Total" value={total.toLocaleString()} />
             <StatTile
               label="Live"
@@ -239,16 +240,20 @@ export default function DashboardView({ onNavigate }: Props) {
               sub={`${s.https_enforced_count.toLocaleString()} sites`}
               good={s.https_enforced_pct >= 90}
             />
-            <StatTile
-              label="USWDS"
-              value={`${s.uswds_any_pct}%`}
-              sub={`${s.uswds_any_count.toLocaleString()} sites`}
-            />
-            <StatTile
-              label="DAP"
-              value={`${s.dap_pct}%`}
-              sub={`${s.dap_count.toLocaleString()} sites`}
-            />
+            {showDapUswds && (
+              <StatTile
+                label="USWDS"
+                value={`${s.uswds_any_pct}%`}
+                sub={`${s.uswds_any_count.toLocaleString()} sites`}
+              />
+            )}
+            {showDapUswds && (
+              <StatTile
+                label="DAP"
+                value={`${s.dap_pct}%`}
+                sub={`${s.dap_count.toLocaleString()} sites`}
+              />
+            )}
             <StatTile
               label="Sitemap"
               value={`${s.sitemap_detected_pct}%`}
@@ -331,7 +336,7 @@ export default function DashboardView({ onNavigate }: Props) {
         {/* ── HTTPS + USWDS donuts ────────────────────────────────────── */}
         <section aria-label="Adoption charts">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Adoption</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className={`grid grid-cols-1 ${showDapUswds ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4`}>
             <ChartCard title="HTTPS Enforcement">
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
@@ -345,18 +350,20 @@ export default function DashboardView({ onNavigate }: Props) {
               </ResponsiveContainer>
             </ChartCard>
 
-            <ChartCard title="USWDS Adoption">
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie data={uswdsDonut} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} innerRadius={45}>
-                    <Cell fill={GOV_BLUE} />
-                    <Cell fill="#e5e7eb" />
-                  </Pie>
-                  <Tooltip formatter={(v) => [v, '']} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartCard>
+            {showDapUswds && (
+              <ChartCard title="USWDS Adoption">
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie data={uswdsDonut} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} innerRadius={45}>
+                      <Cell fill={GOV_BLUE} />
+                      <Cell fill="#e5e7eb" />
+                    </Pie>
+                    <Tooltip formatter={(v) => [v, '']} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            )}
 
             {/* CMS mix */}
             <ChartCard title="CMS Mix">
@@ -444,7 +451,7 @@ export default function DashboardView({ onNavigate }: Props) {
             </ChartCard>
 
             {/* USWDS avg by bureau */}
-            {bureauUswdsData.length > 0 && (
+            {showDapUswds && bureauUswdsData.length > 0 && (
               <ChartCard title="Avg USWDS Score by Bureau (top 12)">
                 <ResponsiveContainer width="100%" height={290}>
                   <BarChart layout="vertical" data={bureauUswdsData} margin={{ top: 0, right: 20, left: 4, bottom: 0 }}>

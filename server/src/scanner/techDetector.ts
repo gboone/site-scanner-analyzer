@@ -198,6 +198,7 @@ export async function detectTech(url: string): Promise<TechStackResult> {
       https_enforced: url.startsWith('https://'),
       hsts: false,
       login_gate: false,
+      title: null,
     };
   }
 
@@ -272,8 +273,12 @@ export async function detectTech(url: string): Promise<TechStackResult> {
 
   const login_gate = detectLoginGate(url, html, responseStatus);
 
+  const pageTitleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(html);
+  const title = pageTitleMatch ? pageTitleMatch[1].trim() : null;
+
   return {
     cms, web_server: webServer, analytics, cdn, hosting_provider: null,
     wordpress, technologies, security_headers, uswds, dap, https_enforced, hsts, login_gate,
+    title,
   };
 }

@@ -65,6 +65,7 @@ export default function SiteReportView({ onNavigate }: Props) {
   const site = data.site as Record<string, unknown>;
   const scans = (data.scan_history ?? []) as any[];
   const redirectSources = ((data as any).redirect_sources ?? []) as string[];
+  const showDapUswds = !site.branch || String(site.branch).includes('Executive');
 
   const bool = (v: unknown) => v === 1 || v === true || v === '1';
 
@@ -151,12 +152,12 @@ export default function SiteReportView({ onNavigate }: Props) {
         {/* Key metric tiles */}
         <section aria-label="Key metrics">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Key Metrics</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className={`grid grid-cols-2 sm:grid-cols-3 ${showDapUswds ? 'lg:grid-cols-6' : 'lg:grid-cols-4'} gap-3`}>
             <StatTile label="Live" value={bool(site.live) ? 'Yes' : 'No'} good={bool(site.live)} />
             <StatTile label="HTTPS" value={bool(site.https_enforced) ? 'Enforced' : 'No'} good={bool(site.https_enforced)} />
             <StatTile label="HSTS" value={bool(site.hsts) ? 'Yes' : 'No'} good={bool(site.hsts)} />
-            <StatTile label="USWDS" value={site.uswds_count != null ? String(site.uswds_count) : '—'} />
-            <StatTile label="DAP" value={bool(site.dap) ? 'Yes' : 'No'} good={bool(site.dap)} />
+            {showDapUswds && <StatTile label="USWDS" value={site.uswds_count != null ? String(site.uswds_count) : '—'} />}
+            {showDapUswds && <StatTile label="DAP" value={bool(site.dap) ? 'Yes' : 'No'} good={bool(site.dap)} />}
             <StatTile label="Sitemap" value={bool(site.sitemap_xml_detected) ? 'Yes' : 'No'} good={bool(site.sitemap_xml_detected)} />
           </div>
         </section>

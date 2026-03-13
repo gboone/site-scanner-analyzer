@@ -64,7 +64,10 @@ const INTERVAL_CRON: Record<ScheduleInterval, string> = {
 
 const FILTER_WHERE: Record<ScanFilter, string> = {
   all:    '',
-  public: 'WHERE (excluded = 0 OR excluded IS NULL)',
+  // is_public is computed during rescan and mirrors PUBLIC_ONLY_CONDITION:
+  // live, non-redirect, non-staging/dev/VPN domain, non-login-page title.
+  // Orthogonal to excluded — both must pass.
+  public: 'WHERE is_public = 1 AND (excluded = 0 OR excluded IS NULL)',
   live:   'WHERE live = 1 AND (excluded = 0 OR excluded IS NULL)',
 };
 
