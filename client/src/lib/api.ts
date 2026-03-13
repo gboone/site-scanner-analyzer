@@ -30,8 +30,6 @@ export const api = {
     const qs = q.toString();
     return request(`/stats${qs ? `?${qs}` : ''}`);
   },
-  importSites: (sites: unknown[]) =>
-    request('/import', { method: 'POST', body: JSON.stringify(sites) }),
   runQuery: (sql: string) =>
     request('/query', { method: 'POST', body: JSON.stringify({ sql }) }),
   getScans: (domain: string) => request(`/scans/${encodeURIComponent(domain)}`),

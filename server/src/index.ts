@@ -5,7 +5,6 @@ import cors from 'cors';
 import { config } from './config';
 import { query, execute, initDb } from './db';
 
-import importRouter from './routes/import';
 import sitesRouter from './routes/sites';
 import statsRouter from './routes/stats';
 import queryRouter from './routes/query';
@@ -135,7 +134,6 @@ async function main() {
   // ---------------------------------------------------------------------------
   // 4. API routes
   // ---------------------------------------------------------------------------
-  app.use('/api/v1/import',    importRouter);
   app.use('/api/v1/sites',     sitesRouter);
   app.use('/api/v1/stats',     statsRouter);
   app.use('/api/v1/query',     queryRouter);

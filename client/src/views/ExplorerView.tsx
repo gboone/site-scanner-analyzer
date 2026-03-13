@@ -6,7 +6,6 @@ import FilterChips from '../components/data-table/FilterChips';
 import ColumnToggle from '../components/data-table/ColumnToggle';
 import Pagination from '../components/data-table/Pagination';
 import SiteDetail from '../components/site-detail/SiteDetail';
-import { DomainImportModal } from '../components/import/DomainImportModal';
 import AgencyBureauFilter from '../components/AgencyBureauFilter';
 import { useSites, useScanSessions } from '../hooks/useSites';
 import { useHiddenSites } from '../hooks/useHiddenSites';
@@ -161,7 +160,6 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [order, setOrder] = React.useState('asc');
   const [filters, setFilters] = React.useState<Record<string, string>>({});
   const [tableInstance, setTableInstance] = React.useState<Table<any> | null>(null);
-  const [importOpen, setImportOpen] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [groupByFinalDomain, setGroupByFinalDomain] = React.useState(false);
 
@@ -286,7 +284,7 @@ export default function ExplorerView({ onNavigate }: Props) {
 
   const clearSelection = () => setSelectedDomains(new Set());
 
-  /** Fetch ALL matching rows (up to 1000) and bulk-select them */
+  /** Fetch ALL matching rows (up to 2500) and bulk-select them */
   const selectAllMatching = async () => {
     setSelectAllLoading(true);
     try {
@@ -295,7 +293,7 @@ export default function ExplorerView({ onNavigate }: Props) {
         ...(agencyFilter ? { agency: agencyFilter } : {}),
         ...(bureauFilter ? { bureau: bureauFilter } : {}),
         page: 1,
-        limit: 1000,
+        limit: 2500,
         sort,
         order,
       }) as any;
@@ -409,13 +407,6 @@ export default function ExplorerView({ onNavigate }: Props) {
             >
               Group by redirect target
             </button>
-            <button
-              onClick={() => setImportOpen(true)}
-              className="btn-secondary text-xs py-0.5 px-2"
-              title="Add domains by pasting or dropping a text file"
-            >
-              + Add domains
-            </button>
             <ColumnToggle table={tableInstance} />
           </div>
         </div>
@@ -462,8 +453,6 @@ export default function ExplorerView({ onNavigate }: Props) {
             aria-label="Filter by state"
           />
         </div>
-
-        <DomainImportModal open={importOpen} onOpenChange={setImportOpen} />
 
         {/* Personal hidden sites banner */}
         {hidden.size > 0 && filters.show_hidden !== 'true' && (

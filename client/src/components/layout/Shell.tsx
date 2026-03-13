@@ -1,7 +1,5 @@
 import React from 'react';
 import type { View } from '../../App';
-import { useImport } from '../../hooks/useSites';
-import { useDropzone } from 'react-dropzone';
 import { useScanQueue } from '../../contexts/ScanQueueContext';
 
 interface ShellProps {
@@ -19,8 +17,6 @@ const NAV_ITEMS: Array<{ id: View; label: string; icon: string }> = [
 ];
 
 export default function Shell({ currentView, onNavigate, onCopyLink, children }: ShellProps) {
-  const importMutation = useImport();
-  const [importStatus, setImportStatus] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
   const { scan, stopScan } = useScanQueue();
 
@@ -32,29 +28,8 @@ export default function Shell({ currentView, onNavigate, onCopyLink, children }:
     }
   }, [onCopyLink]);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: { 'application/json': ['.json'] },
-    noClick: true,
-    onDrop: async (files) => {
-      const file = files[0];
-      if (!file) return;
-      setImportStatus(`Loading ${file.name}...`);
-      try {
-        const text = await file.text();
-        const data = JSON.parse(text);
-        const sites = Array.isArray(data) ? data : data.results || data.data || [];
-        const result = await importMutation.mutateAsync(sites) as any;
-        setImportStatus(`✓ Imported: ${result.inserted} new, ${result.updated} updated`);
-        setTimeout(() => setImportStatus(null), 5000);
-      } catch (err: any) {
-        setImportStatus(`✗ Import failed: ${err.message}`);
-        setTimeout(() => setImportStatus(null), 8000);
-      }
-    },
-  });
-
   return (
-    <div {...getRootProps()} className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50">
       {/* Skip navigation */}
       <a
         href="#main-content"
@@ -62,18 +37,6 @@ export default function Shell({ currentView, onNavigate, onCopyLink, children }:
       >
         Skip to main content
       </a>
-
-      <input {...getInputProps()} />
-
-      {/* Drop overlay */}
-      {isDragActive && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-gov-blue/20 border-4 border-dashed border-gov-blue" aria-live="assertive" aria-atomic="true">
-          <div className="bg-white rounded-xl p-8 text-center shadow-2xl">
-            <div className="text-4xl mb-3" aria-hidden="true">📂</div>
-            <div className="text-xl font-semibold text-gov-blue">Drop JSON file to import</div>
-          </div>
-        </div>
-      )}
 
       {/* Sidebar */}
       <aside className="w-48 flex-shrink-0 bg-gov-blue-dark text-white flex flex-col" aria-label="Main navigation">
@@ -108,8 +71,8 @@ export default function Shell({ currentView, onNavigate, onCopyLink, children }:
             </button>
           ))}
         </nav>
-        {/* Sidebar footer — scan progress when running, hint otherwise */}
-        {scan.running ? (
+        {/* Sidebar footer — scan progress when running */}
+        {scan.running && (
           <div className="p-3 border-t border-white/20 space-y-1.5" role="status" aria-live="polite" aria-atomic="false">
             <div className="flex items-center justify-between gap-1">
               <span className="text-xs text-white/80 font-medium truncate">
@@ -147,28 +110,11 @@ export default function Shell({ currentView, onNavigate, onCopyLink, children }:
               )}
             </p>
           </div>
-        ) : (
-          <div className="p-3 border-t border-white/20 text-xs text-white/50" aria-hidden="true">
-            Drop JSON to import
-          </div>
         )}
       </aside>
 
       {/* Main */}
       <main id="main-content" className="flex-1 flex flex-col overflow-hidden">
-        {/* Import status toast */}
-        <div
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          className={importStatus ? `px-4 py-2 text-sm font-medium ${
-            importStatus.startsWith('✓') ? 'bg-green-50 text-green-800 border-b border-green-200' :
-            importStatus.startsWith('✗') ? 'bg-red-50 text-red-800 border-b border-red-200' :
-            'bg-blue-50 text-blue-800 border-b border-blue-200'
-          }` : 'sr-only'}
-        >
-          {importStatus ?? ''}
-        </div>
         <div className="flex-1 overflow-hidden">
           {children}
         </div>
