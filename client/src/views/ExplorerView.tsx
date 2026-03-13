@@ -42,17 +42,12 @@ const COLUMNS: ColumnDef<Record<string, unknown>, any>[] = [
     cell: (c) => {
       const v = String(c.getValue() || '');
       if (!v) return <span className="text-gray-300 text-xs">—</span>;
-      const cls: Record<string, string> = {
-        'Federal': 'badge-blue',
-        'State/Territory': 'badge-green',
-        'Tribal': 'badge-yellow',
-        'County': 'badge-gray',
-        'City': 'badge-gray',
-        'Interstate': 'badge-gray',
-        'Special District': 'badge-gray',
-        'School District': 'badge-gray',
-      };
-      return <span className={`badge ${cls[v] ?? 'badge-gray'} text-xs`}>{v}</span>;
+      // Values include "Federal - Executive", "City - Election", "State or territory", etc.
+      const badgeCls = v.startsWith('Federal') ? 'badge-blue'
+        : v.startsWith('State') ? 'badge-green'
+        : v.startsWith('Tribal') ? 'badge-yellow'
+        : 'badge-gray';
+      return <span className={`badge ${badgeCls} text-xs`}>{v}</span>;
     },
   },
   {

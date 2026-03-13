@@ -8,7 +8,9 @@ const router = Router();
 export default router;
 
 const GETGOV_CSV_URL = 'https://raw.githubusercontent.com/cisagov/dotgov-data/main/current-full.csv';
-const FEDERAL_TYPE = 'Federal';
+// Actual domain type values from the get.gov CSV use "Federal - Executive",
+// "Federal - Legislative", "Federal - Judicial" etc.
+const isFederalType = (t: string) => t.startsWith('Federal');
 
 // ---------------------------------------------------------------------------
 // CSV parser — handles quoted fields, parses by header name (not index)
@@ -122,23 +124,25 @@ export async function importFromGetGov(
     const valid: Array<{ row: Record<string, unknown>; isNew: boolean; domain: string; isFederal: boolean }> = [];
 
     for (const csv of batch) {
-      const domain = (csv['Domain Name'] ?? '').toLowerCase().trim();
+      // Actual CSV columns (as of 2025):
+      //   Domain name, Domain type, Organization name, Suborganization name, City, State, Security contact email
+      const domain = (csv['Domain name'] ?? '').toLowerCase().trim();
       if (!domain) continue;
-      const domainType = (csv['Domain Type'] ?? '').trim();
+      const domainType = (csv['Domain type'] ?? '').trim();
       const isNew = !existingDomains.has(domain);
       existingDomains.add(domain); // deduplicate within payload
       valid.push({
         domain,
         isNew,
-        isFederal: domainType === FEDERAL_TYPE,
+        isFederal: isFederalType(domainType),
         row: {
           domain,
           domain_type:            domainType || null,
           city:                   csv['City']?.trim() || null,
           state:                  csv['State']?.trim() || null,
-          security_contact_email: csv['Security Contact Email']?.trim() || null,
-          name:                   csv['Organization']?.trim() || csv['Agency']?.trim() || null,
-          agency:                 csv['Agency']?.trim() || null,
+          security_contact_email: csv['Security contact email']?.trim() || null,
+          name:                   csv['Organization name']?.trim() || null,
+          agency:                 csv['Suborganization name']?.trim() || null,
           imported_at:            now,
           updated_at:             now,
         },

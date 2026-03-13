@@ -191,7 +191,7 @@ export default function SettingsView() {
         );
       }) as any;
       setGetgovImportStatus(
-        `✓ ${r.inserted} new domains (${r.new_federal} federal, ${r.new_nonfederal} non-federal), ${r.updated} updated` +
+        `✓ ${r.total_rows?.toLocaleString()} rows parsed — ${r.inserted} new domains (${r.new_federal} federal, ${r.new_nonfederal} non-federal), ${r.updated} updated` +
         (r.error_count > 0 ? ` — ${r.error_count} errors` : '')
       );
       setGetgovImportErrors(r.errors ?? []);
