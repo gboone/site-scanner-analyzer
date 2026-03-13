@@ -42,7 +42,7 @@ export interface GetGovScheduleConfig {
 
 export interface SchedulerStatus {
   gsa: GsaScheduleConfig & { last_run?: string; last_status?: string };
-  scan: ScanScheduleConfig & { last_run?: string; last_status?: string; last_session_id?: string };
+  scan: ScanScheduleConfig & { last_run?: string; last_status?: string; last_session_id?: string; scan_is_running: boolean };
   getgov: GetGovScheduleConfig & { last_run?: string; last_status?: string };
 }
 
@@ -113,6 +113,10 @@ let getgovTask: ScheduledTask | null = null;
 let scanRunning = false;
 let gsaRunning = false;
 let getgovRunning = false;
+/** Set to true by stopRescan() to interrupt the scan loop between sites. */
+let scanAbortRequested = false;
+/** ID of the currently-active scan session, if any. */
+let activeScanSessionId: number | null = null;
 
 // ---------------------------------------------------------------------------
 // GSA refresh job
@@ -191,11 +195,12 @@ export async function runGetGovRefresh(): Promise<void> {
 async function withConcurrency<T>(
   items: T[],
   limit: number,
-  fn: (item: T) => Promise<void>
+  fn: (item: T) => Promise<void>,
+  shouldAbort?: () => boolean,
 ): Promise<void> {
   let index = 0;
   async function worker() {
-    while (index < items.length) {
+    while (index < items.length && !(shouldAbort?.())) {
       const item = items[index++];
       await fn(item);
     }
@@ -210,6 +215,8 @@ export async function runSiteRescan(): Promise<void> {
     return;
   }
   scanRunning = true;
+  scanAbortRequested = false;
+  activeScanSessionId = null;
   const startTime = new Date().toISOString();
   console.log(`[scheduler] Site rescan started at ${startTime}`);
   await writeSetting('SCHEDULER_SCAN_LAST_RUN', startTime);
@@ -236,6 +243,7 @@ export async function runSiteRescan(): Promise<void> {
       [startTime, sites.length, `Scheduled rescan — ${filter}`]
     );
     const sessionId = sessionResult.insertId;
+    activeScanSessionId = sessionId;
     await writeSetting('SCHEDULER_SCAN_LAST_SESSION_ID', String(sessionId));
 
     let completed = 0;
@@ -257,17 +265,19 @@ export async function runSiteRescan(): Promise<void> {
           [completed, failed, sessionId]
         ).catch(() => {});
       }
-    });
+    }, () => scanAbortRequested);
 
-    // Finalise the session
+    // Finalise the session — 'stopped' if aborted, otherwise 'completed'
+    const finalStatus = scanAbortRequested ? 'stopped' : 'completed';
     await execute(
       `UPDATE scan_sessions
-       SET status = 'completed', completed_at = ?, completed_count = ?, failed_count = ?
+       SET status = ?, completed_at = ?, completed_count = ?, failed_count = ?
        WHERE id = ?`,
-      [new Date().toISOString(), completed, failed, sessionId]
+      [finalStatus, new Date().toISOString(), completed, failed, sessionId]
     );
+    activeScanSessionId = null;
 
-    const status = `ok: ${completed} completed, ${failed} failed`;
+    const status = `${finalStatus === 'stopped' ? 'stopped' : 'ok'}: ${completed} completed, ${failed} failed`;
     await writeSetting('SCHEDULER_SCAN_LAST_STATUS', status);
     console.log(`[scheduler] Site rescan complete — ${status}`);
   } catch (err: any) {
@@ -360,6 +370,7 @@ export async function getStatus(): Promise<SchedulerStatus> {
       last_run: settings['SCHEDULER_SCAN_LAST_RUN'],
       last_status: settings['SCHEDULER_SCAN_LAST_STATUS'],
       last_session_id: settings['SCHEDULER_SCAN_LAST_SESSION_ID'],
+      scan_is_running: scanRunning,
     },
     getgov: {
       enabled: settings['SCHEDULER_GETGOV_ENABLED'] === 'true',
@@ -368,6 +379,25 @@ export async function getStatus(): Promise<SchedulerStatus> {
       last_status: settings['SCHEDULER_GETGOV_LAST_STATUS'],
     },
   };
+}
+
+/**
+ * Request an in-progress scheduler site rescan to stop after the current
+ * in-flight sites finish. Marks the session 'stopped' in the DB immediately
+ * so the UI reflects the change without waiting for the loop to drain.
+ * Returns true if a scan was running, false if nothing to stop.
+ */
+export async function stopRescan(): Promise<boolean> {
+  if (!scanRunning) return false;
+  scanAbortRequested = true;
+  if (activeScanSessionId !== null) {
+    await execute(
+      `UPDATE scan_sessions SET status = 'stopped', completed_at = DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ') WHERE id = ? AND status = 'running'`,
+      [activeScanSessionId]
+    ).catch(() => {});
+  }
+  console.log('[scheduler] Site rescan stop requested');
+  return true;
 }
 
 /** Write a batch of scheduler settings. */

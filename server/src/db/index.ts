@@ -374,6 +374,15 @@ export async function initDb(): Promise<void> {
   await pool.query(`UPDATE sites SET is_public = 1 WHERE is_public IS NULL AND ${PUBLIC_ONLY_CONDITION}`);
   await pool.query(`UPDATE sites SET is_public = 0 WHERE is_public IS NULL`);
 
+  // Mark any scan sessions that were left in 'running' state by a previous server process
+  // as 'stopped' — they can never complete now that the process is gone.
+  const [staleSessions] = await pool.query(
+    `UPDATE scan_sessions SET status = 'stopped', completed_at = DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ') WHERE status = 'running'`
+  ) as any;
+  if ((staleSessions.affectedRows ?? 0) > 0) {
+    console.log(`  marked ${staleSessions.affectedRows} stale scan session(s) as stopped`);
+  }
+
   // Clean up any null-domain rows from old broken imports
   const [deleted] = await pool.query('DELETE FROM sites WHERE domain IS NULL') as any;
   if ((deleted.affectedRows ?? 0) > 0) {

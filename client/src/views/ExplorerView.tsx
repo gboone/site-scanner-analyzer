@@ -161,6 +161,7 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [filters, setFilters] = React.useState<Record<string, string>>({});
   const [tableInstance, setTableInstance] = React.useState<Table<any> | null>(null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [schedulerStopStatus, setSchedulerStopStatus] = React.useState<string | null>(null);
   const [groupByFinalDomain, setGroupByFinalDomain] = React.useState(false);
 
   // Bulk selection state
@@ -301,6 +302,18 @@ export default function ExplorerView({ onNavigate }: Props) {
       setSelectedDomains(new Set(domains));
     } finally {
       setSelectAllLoading(false);
+    }
+  };
+
+  /** Stop a scheduler-initiated scan that is showing as 'running' in the session history. */
+  const stopSchedulerScan = async () => {
+    setSchedulerStopStatus('Stopping…');
+    try {
+      const r = await api.stopSiteRescan() as any;
+      setSchedulerStopStatus(r.stopped ? '⏹ Stop requested' : '✗ No scheduler scan running');
+      setTimeout(() => setSchedulerStopStatus(null), 4000);
+    } catch (err: any) {
+      setSchedulerStopStatus(`✗ ${(err as any).message}`);
     }
   };
 
@@ -514,6 +527,7 @@ export default function ExplorerView({ onNavigate }: Props) {
                   <th className="text-right px-3 py-1 font-medium">Done</th>
                   <th className="text-right px-3 py-1 font-medium">Failed</th>
                   <th className="text-right px-3 py-1 font-medium">Started</th>
+                  <th className="px-3 py-1" />
                 </tr>
               </thead>
               <tbody>
@@ -529,6 +543,23 @@ export default function ExplorerView({ onNavigate }: Props) {
                     <td className="px-3 py-1 text-right text-green-600">{s.completed_count}</td>
                     <td className="px-3 py-1 text-right text-red-500">{s.failed_count || '—'}</td>
                     <td className="px-3 py-1 text-right text-gray-400">{formatRelativeTime(String(s.started_at))}</td>
+                    <td className="px-3 py-1 text-right">
+                      {s.status === 'running' && (
+                        schedulerStopStatus ? (
+                          <span className={`text-xs ${schedulerStopStatus.startsWith('✗') ? 'text-red-500' : 'text-yellow-600'}`}>
+                            {schedulerStopStatus}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={stopSchedulerScan}
+                            className="text-red-500 hover:text-red-700 text-xs underline"
+                            title="Stop this scheduler scan"
+                          >
+                            ⏹ stop
+                          </button>
+                        )
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

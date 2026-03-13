@@ -108,6 +108,7 @@ export default function SettingsView() {
   const [schedSaving, setSchedSaving] = React.useState(false);
   const [gsaRunStatus, setGsaRunStatus] = React.useState<string | null>(null);
   const [scanRunStatus, setScanRunStatus] = React.useState<string | null>(null);
+  const [scanStopStatus, setScanStopStatus] = React.useState<string | null>(null);
   const [getgovRunStatus, setGetgovRunStatus] = React.useState<string | null>(null);
 
   // Sync scheduler form state when data loads
@@ -240,12 +241,24 @@ export default function SettingsView() {
 
   const triggerScan = async () => {
     setScanRunStatus('Triggering…');
+    setScanStopStatus(null);
     try {
       await api.triggerSiteRescan();
       setScanRunStatus('Triggered — check Scan Sessions for progress');
       setTimeout(() => { refetchScheduler(); }, 3000);
     } catch (err: any) {
       setScanRunStatus(`✗ ${err.message}`);
+    }
+  };
+
+  const stopScan = async () => {
+    setScanStopStatus('Stopping…');
+    try {
+      const r = await api.stopSiteRescan() as any;
+      setScanStopStatus(r.stopped ? '⏹ Stop requested — finishing current sites' : '✗ No scan was running');
+      setTimeout(() => { refetchScheduler(); }, 2000);
+    } catch (err: any) {
+      setScanStopStatus(`✗ ${err.message}`);
     }
   };
 
@@ -511,9 +524,15 @@ export default function SettingsView() {
               </select>
             </div>
           </div>
-          <div className="mt-2 flex items-center gap-3">
-            <button onClick={triggerScan} className="btn-secondary text-xs">Run now</button>
+          <div className="mt-2 flex items-center gap-3 flex-wrap">
+            <button onClick={triggerScan} disabled={!!schedulerData?.scan.scan_is_running} className="btn-secondary text-xs disabled:opacity-40">Run now</button>
+            {schedulerData?.scan.scan_is_running && (
+              <button onClick={stopScan} className="btn-secondary text-xs text-red-600 border-red-300 hover:border-red-500">
+                ⏹ Stop scan
+              </button>
+            )}
             {scanRunStatus && <span className="text-xs text-gray-500">{scanRunStatus}</span>}
+            {scanStopStatus && <span className={`text-xs ${scanStopStatus.startsWith('✗') ? 'text-red-600' : 'text-yellow-600'}`}>{scanStopStatus}</span>}
           </div>
           {schedulerData?.scan.last_run && (
             <div className="mt-2 text-xs text-gray-400">
