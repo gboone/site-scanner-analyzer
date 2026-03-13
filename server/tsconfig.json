@@ -12,7 +12,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {
-      "shared": ["../node_modules/shared/src/index.ts"]
+      "shared": ["../shared/src/index.ts"]
     }
   },
   "include": ["src/**/*"],
