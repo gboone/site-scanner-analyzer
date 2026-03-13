@@ -5,6 +5,7 @@ import {
   reconfigure,
   runGsaRefresh,
   runSiteRescan,
+  stopRescan,
   runGetGovRefresh,
   type ScheduleInterval,
   type ScanFilter,
@@ -110,6 +111,16 @@ router.post('/scan/run', async (_req: Request, res: Response) => {
   // Respond immediately; job runs in the background
   res.json({ ok: true, message: 'Site rescan triggered' });
   runSiteRescan().catch(console.error);
+});
+
+// POST /api/v1/scheduler/scan/stop — request the running rescan to stop
+router.post('/scan/stop', async (_req: Request, res: Response) => {
+  try {
+    const stopped = await stopRescan();
+    res.json({ ok: true, stopped, message: stopped ? 'Stop requested — scan will halt after current sites finish' : 'No scan was running' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // PUT /api/v1/scheduler/getgov — update get.gov refresh job config

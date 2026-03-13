@@ -151,7 +151,7 @@ export const api = {
   // Scheduler — configured scheduled background jobs
   getSchedulerStatus: () => request<{
     gsa: { enabled: boolean; interval: string; agency?: string; last_run?: string; last_status?: string };
-    scan: { enabled: boolean; interval: string; filter: string; last_run?: string; last_status?: string; last_session_id?: string };
+    scan: { enabled: boolean; interval: string; filter: string; last_run?: string; last_status?: string; last_session_id?: string; scan_is_running: boolean };
     getgov: { enabled: boolean; interval: string; last_run?: string; last_status?: string };
   }>('/scheduler/status'),
   updateGsaSchedule: (data: { enabled?: boolean; interval?: string; agency?: string }) =>
@@ -164,6 +164,8 @@ export const api = {
     request('/scheduler/gsa/run', { method: 'POST' }),
   triggerSiteRescan: () =>
     request('/scheduler/scan/run', { method: 'POST' }),
+  stopSiteRescan: () =>
+    request('/scheduler/scan/stop', { method: 'POST' }),
   triggerGetGovRefresh: () =>
     request('/scheduler/getgov/run', { method: 'POST' }),
 };
