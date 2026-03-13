@@ -92,6 +92,11 @@ export default function SettingsView() {
   const [gsaImportErrors, setGsaImportErrors] = React.useState<string[]>([]);
   const [gsaImportErrorCount, setGsaImportErrorCount] = React.useState(0);
 
+  // get.gov import state
+  const [getgovImporting, setGetgovImporting] = React.useState(false);
+  const [getgovImportStatus, setGetgovImportStatus] = React.useState<string | null>(null);
+  const [getgovImportErrors, setGetgovImportErrors] = React.useState<string[]>([]);
+
   // Scheduler state
   const { data: schedulerData, refetch: refetchScheduler } = useQuery({
     queryKey: ['scheduler-status'],
@@ -99,9 +104,11 @@ export default function SettingsView() {
   });
   const [gsaSched, setGsaSched] = React.useState({ enabled: false, interval: '24h', agency: '' });
   const [scanSched, setScanSched] = React.useState({ enabled: false, interval: '24h', filter: 'all' });
+  const [getgovSched, setGetgovSched] = React.useState({ enabled: false, interval: '24h' });
   const [schedSaving, setSchedSaving] = React.useState(false);
   const [gsaRunStatus, setGsaRunStatus] = React.useState<string | null>(null);
   const [scanRunStatus, setScanRunStatus] = React.useState<string | null>(null);
+  const [getgovRunStatus, setGetgovRunStatus] = React.useState<string | null>(null);
 
   // Sync scheduler form state when data loads
   React.useEffect(() => {
@@ -115,6 +122,10 @@ export default function SettingsView() {
         enabled: schedulerData.scan.enabled,
         interval: schedulerData.scan.interval || '24h',
         filter: schedulerData.scan.filter || 'all',
+      });
+      setGetgovSched({
+        enabled: schedulerData.getgov.enabled,
+        interval: schedulerData.getgov.interval || '24h',
       });
     }
   }, [schedulerData]);
@@ -169,11 +180,34 @@ export default function SettingsView() {
     }
   };
 
+  const importFromGetGovRegistry = async () => {
+    setGetgovImporting(true);
+    setGetgovImportStatus(null);
+    setGetgovImportErrors([]);
+    try {
+      const r = await api.importFromGetGov((progress) => {
+        setGetgovImportStatus(
+          `Processing row ${progress.processed} of ${progress.total}… (${progress.inserted} new, ${progress.updated} updated)`
+        );
+      }) as any;
+      setGetgovImportStatus(
+        `✓ ${r.inserted} new domains (${r.new_federal} federal, ${r.new_nonfederal} non-federal), ${r.updated} updated` +
+        (r.error_count > 0 ? ` — ${r.error_count} errors` : '')
+      );
+      setGetgovImportErrors(r.errors ?? []);
+    } catch (err: any) {
+      setGetgovImportStatus(`✗ ${err.message}`);
+    } finally {
+      setGetgovImporting(false);
+    }
+  };
+
   const saveScheduler = async () => {
     setSchedSaving(true);
     try {
       await api.updateGsaSchedule({ enabled: gsaSched.enabled, interval: gsaSched.interval, agency: gsaSched.agency || undefined });
       await api.updateScanSchedule({ enabled: scanSched.enabled, interval: scanSched.interval, filter: scanSched.filter });
+      await api.updateGetGovSchedule({ enabled: getgovSched.enabled, interval: getgovSched.interval });
       await refetchScheduler();
     } catch (err: any) {
       alert(`Failed to save: ${err.message}`);
@@ -190,6 +224,17 @@ export default function SettingsView() {
       setTimeout(() => { refetchScheduler(); }, 3000);
     } catch (err: any) {
       setGsaRunStatus(`✗ ${err.message}`);
+    }
+  };
+
+  const triggerGetGov = async () => {
+    setGetgovRunStatus('Triggering…');
+    try {
+      await api.triggerGetGovRefresh();
+      setGetgovRunStatus('Triggered — check server logs for progress');
+      setTimeout(() => { refetchScheduler(); }, 3000);
+    } catch (err: any) {
+      setGetgovRunStatus(`✗ ${err.message}`);
     }
   };
 
@@ -296,6 +341,41 @@ export default function SettingsView() {
                   {gsaImportErrorCount > gsaImportErrors.length && (
                     <li className="text-gray-400 font-sans">…and {gsaImportErrorCount - gsaImportErrors.length} more</li>
                   )}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-y border-gray-100">
+          get.gov Registry
+        </div>
+        <div className="py-3 border-b border-gray-100">
+          <div className="text-xs font-medium text-gray-700 mb-1">Import from get.gov</div>
+          <div className="text-xs text-gray-500 mb-3">
+            Fetches the full CISA .gov domain registry (federal, state, tribal, county, city, and more) and
+            upserts all records into the local database. New domains are queued for scanning automatically.
+            Non-federal domains also get subdomain discovery via Certificate Transparency logs.
+          </div>
+          <div className="flex gap-2 items-center">
+            <button
+              onClick={importFromGetGovRegistry}
+              disabled={getgovImporting}
+              className="btn-primary text-xs whitespace-nowrap disabled:opacity-50"
+            >
+              {getgovImporting ? 'Importing…' : 'Import from get.gov'}
+            </button>
+          </div>
+          {getgovImportStatus && (
+            <div className="mt-2">
+              <div className={`text-xs ${getgovImportStatus.startsWith('✓') ? 'text-green-600' : getgovImporting ? 'text-gray-500' : 'text-red-600'}`}>
+                {getgovImportStatus}
+              </div>
+              {getgovImportErrors.length > 0 && (
+                <ul className="mt-1.5 text-xs text-red-600 space-y-0.5 max-h-32 overflow-y-auto bg-red-50 rounded p-2 font-mono">
+                  {getgovImportErrors.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
                 </ul>
               )}
             </div>
@@ -441,6 +521,56 @@ export default function SettingsView() {
               {schedulerData.scan.last_status && (
                 <span className={`ml-2 ${schedulerData.scan.last_status.startsWith('ok') ? 'text-green-600' : 'text-red-500'}`}>
                   — {schedulerData.scan.last_status}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* get.gov Registry Sync */}
+        <div className="py-4 border-t border-gray-100">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-sm font-medium text-gray-800">get.gov Registry Sync</div>
+              <div className="text-xs text-gray-500 mt-0.5">Refresh the full CISA .gov domain registry (all government levels)</div>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <span className="text-xs text-gray-500">{getgovSched.enabled ? 'Enabled' : 'Disabled'}</span>
+              <div
+                role="switch"
+                aria-checked={getgovSched.enabled}
+                onClick={() => setGetgovSched(p => ({ ...p, enabled: !p.enabled }))}
+                className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer ${getgovSched.enabled ? 'bg-gov-blue' : 'bg-gray-200'}`}
+              >
+                <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${getgovSched.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </div>
+            </label>
+          </div>
+          <div className="flex gap-3 items-end">
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">Interval</label>
+              <select
+                value={getgovSched.interval}
+                onChange={e => setGetgovSched(p => ({ ...p, interval: e.target.value }))}
+                disabled={!getgovSched.enabled}
+                className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gov-blue disabled:opacity-40"
+              >
+                {Object.entries(INTERVAL_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <button onClick={triggerGetGov} className="btn-secondary text-xs">Run now</button>
+            {getgovRunStatus && <span className="text-xs text-gray-500">{getgovRunStatus}</span>}
+          </div>
+          {schedulerData?.getgov.last_run && (
+            <div className="mt-2 text-xs text-gray-400">
+              Last run: {new Date(schedulerData.getgov.last_run).toLocaleString()}
+              {schedulerData.getgov.last_status && (
+                <span className={`ml-2 ${schedulerData.getgov.last_status.startsWith('ok') ? 'text-green-600' : 'text-red-500'}`}>
+                  — {schedulerData.getgov.last_status}
                 </span>
               )}
             </div>

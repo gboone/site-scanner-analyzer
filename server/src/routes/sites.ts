@@ -19,6 +19,7 @@ router.get('/', async (req: Request, res: Response) => {
     'dap', 'pageviews', 'sitemap_xml_detected', 'https_enforced', 'scan_date',
     'sitemap_xml_count', 'robots_txt_detected', 'imported_at', 'updated_at',
     'cms', 'title', 'final_domain',
+    'city', 'state', 'domain_type',
   ]);
   const rawSort = SORTABLE.has(sort) ? sort : 'domain';
   // final_domain is a computed alias — must reference the expression in ORDER BY
@@ -30,7 +31,7 @@ router.get('/', async (req: Request, res: Response) => {
   const params: Record<string, unknown> = {};
 
   if (search) {
-    conditions.push('(domain LIKE :search OR agency LIKE :search OR bureau LIKE :search OR title LIKE :search)');
+    conditions.push('(domain LIKE :search OR agency LIKE :search OR bureau LIKE :search OR title LIKE :search OR city LIKE :search OR state LIKE :search)');
     params.search = `%${search}%`;
   }
 
@@ -51,6 +52,18 @@ router.get('/', async (req: Request, res: Response) => {
   if (req.query.bureau) {
     conditions.push('bureau = :bureau');
     params.bureau = req.query.bureau;
+  }
+  if (req.query.domain_type) {
+    conditions.push('domain_type = :domain_type');
+    params.domain_type = req.query.domain_type;
+  }
+  if (req.query.state) {
+    conditions.push('state = :state');
+    params.state = req.query.state;
+  }
+  if (req.query.city) {
+    conditions.push('city LIKE :city');
+    params.city = `%${req.query.city}%`;
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -75,6 +88,19 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[sites] GET / error:', err.message);
     res.status(500).json({ error: 'Failed to fetch sites' });
+  }
+});
+
+// GET /api/v1/sites/domain-types — distinct domain_type values for filter dropdown
+// Must be registered before /:domain to avoid the param handler catching it
+router.get('/domain-types', async (_req: Request, res: Response) => {
+  try {
+    const rows = await query<{ domain_type: string }>(
+      'SELECT DISTINCT domain_type FROM sites WHERE domain_type IS NOT NULL ORDER BY domain_type'
+    );
+    res.json(rows.map(r => r.domain_type));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

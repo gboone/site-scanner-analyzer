@@ -116,17 +116,56 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  // get.gov registry import
+  importFromGetGov: async (
+    onProgress?: (data: { processed: number; total: number; inserted: number; updated: number }) => void
+  ) => {
+    const res = await fetch(`${BASE}/getgov/import`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error((err as any).error || `HTTP ${res.status}`);
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: any = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const data = JSON.parse(line);
+          if (data.type === 'complete' || data.type === 'error') result = data;
+          else if (data.type === 'progress') onProgress?.(data);
+        } catch { /* ignore partial lines */ }
+      }
+    }
+    if (result?.type === 'error') throw new Error(result.error);
+    return result;
+  },
+  testGetGov: () => request('/getgov/test'),
+  getDomainTypes: () => request<string[]>('/sites/domain-types'),
+
   // Scheduler — configured scheduled background jobs
   getSchedulerStatus: () => request<{
     gsa: { enabled: boolean; interval: string; agency?: string; last_run?: string; last_status?: string };
     scan: { enabled: boolean; interval: string; filter: string; last_run?: string; last_status?: string; last_session_id?: string };
+    getgov: { enabled: boolean; interval: string; last_run?: string; last_status?: string };
   }>('/scheduler/status'),
   updateGsaSchedule: (data: { enabled?: boolean; interval?: string; agency?: string }) =>
     request('/scheduler/gsa', { method: 'PUT', body: JSON.stringify(data) }),
   updateScanSchedule: (data: { enabled?: boolean; interval?: string; filter?: string }) =>
     request('/scheduler/scan', { method: 'PUT', body: JSON.stringify(data) }),
+  updateGetGovSchedule: (data: { enabled?: boolean; interval?: string }) =>
+    request('/scheduler/getgov', { method: 'PUT', body: JSON.stringify(data) }),
   triggerGsaRefresh: () =>
     request('/scheduler/gsa/run', { method: 'POST' }),
   triggerSiteRescan: () =>
     request('/scheduler/scan/run', { method: 'POST' }),
+  triggerGetGovRefresh: () =>
+    request('/scheduler/getgov/run', { method: 'POST' }),
 };

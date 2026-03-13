@@ -1,4 +1,5 @@
 import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import { DataTable, type Table } from '../components/data-table/DataTable';
 import FilterChips from '../components/data-table/FilterChips';
@@ -33,6 +34,32 @@ const COLUMNS: ColumnDef<Record<string, unknown>, any>[] = [
     header: 'Agency',
     size: 180,
     cell: (c) => <span className="text-gray-700 truncate">{String(c.getValue() || '—')}</span>,
+  },
+  {
+    accessorKey: 'domain_type',
+    header: 'Type',
+    size: 110,
+    cell: (c) => {
+      const v = String(c.getValue() || '');
+      if (!v) return <span className="text-gray-300 text-xs">—</span>;
+      const cls: Record<string, string> = {
+        'Federal': 'badge-blue',
+        'State/Territory': 'badge-green',
+        'Tribal': 'badge-yellow',
+        'County': 'badge-gray',
+        'City': 'badge-gray',
+        'Interstate': 'badge-gray',
+        'Special District': 'badge-gray',
+        'School District': 'badge-gray',
+      };
+      return <span className={`badge ${cls[v] ?? 'badge-gray'} text-xs`}>{v}</span>;
+    },
+  },
+  {
+    accessorKey: 'state',
+    header: 'State',
+    size: 55,
+    cell: (c) => <span className="text-gray-500 font-mono text-xs">{String(c.getValue() || '—')}</span>,
   },
   {
     accessorKey: 'live',
@@ -155,6 +182,11 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [agencyFilter, setAgencyFilter] = React.useState('');
   const [bureauFilter, setBureauFilter] = React.useState('');
 
+  // get.gov jurisdiction / location filters
+  const [domainTypeFilter, setDomainTypeFilter] = React.useState('');
+  const [stateFilter, setStateFilter] = React.useState('');
+  const { data: domainTypes = [] } = useQuery({ queryKey: ['domain-types'], queryFn: () => api.getDomainTypes() });
+
   // Overfetch to compensate for client-side hidden rows, capped at 100 total
   const fetchLimit = filters.show_hidden === 'true' ? 25 : Math.min(25 + hidden.size, 100);
 
@@ -165,6 +197,8 @@ export default function ExplorerView({ onNavigate }: Props) {
     ...filters,
     ...(agencyFilter ? { agency: agencyFilter } : {}),
     ...(bureauFilter ? { bureau: bureauFilter } : {}),
+    ...(domainTypeFilter ? { domain_type: domainTypeFilter } : {}),
+    ...(stateFilter ? { state: stateFilter } : {}),
   };
   const { data, isLoading } = useSites(queryParams);
 
@@ -410,6 +444,28 @@ export default function ExplorerView({ onNavigate }: Props) {
               {[agencyFilter, bureauFilter].filter(Boolean).join(' › ')}
             </span>
           )}
+          {domainTypes.length > 0 && (
+            <select
+              value={domainTypeFilter}
+              onChange={(e) => { setDomainTypeFilter(e.target.value); setPage(1); }}
+              className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 shrink-0"
+              aria-label="Filter by government type"
+            >
+              <option value="">All types</option>
+              {domainTypes.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          )}
+          <input
+            type="text"
+            value={stateFilter}
+            onChange={(e) => { setStateFilter(e.target.value.toUpperCase().slice(0, 2)); setPage(1); }}
+            placeholder="State"
+            maxLength={2}
+            className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-14 shrink-0 font-mono"
+            aria-label="Filter by state"
+          />
         </div>
 
         <DomainImportModal open={importOpen} onOpenChange={setImportOpen} />
