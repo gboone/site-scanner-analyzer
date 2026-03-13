@@ -93,6 +93,7 @@ async function runScan(url: string): Promise<ScanResult> {
 // Public-site classifier — JS mirror of PUBLIC_ONLY_CONDITION in publicFilter.ts
 // ---------------------------------------------------------------------------
 
+// Non-production environment subdomain prefixes (mirrors PUBLIC_ONLY_CONDITION domain block)
 const NON_PROD_PREFIXES = [
   'staging.', 'uat.', 'test.', 'dev.', 'demo.', 'qa.', 'stg.',
   'sit.', 'preprod.', 'pre-prod.', 'sandbox.', 'training.',
@@ -102,19 +103,52 @@ const NON_PROD_INFIX = [
   '.staging.', '.uat.', '.test.', '.dev.', '.demo.', '.qa.', '.stg.',
   '-staging.', '-uat.', '-test.', '-dev.', '-demo.',
 ];
+// Internal-access / file-transfer / vendor portal domain prefixes
+const INTERNAL_PREFIXES = [
+  'ftp.', 'sftp.', 'files.', 'sharefiles.',
+  'mail.', 'webmail.',
+  'owa.', 'exchange.',
+  'horizon.',
+];
+// VPN / remote-access portal domain prefixes and infixes
 const VPN_PREFIXES = [
   'vpn.', 'vpngateway.', 'webvpn.', 'sslvpn.', 'remote.', 'citrix.',
   'pulse.', 'anyconnect.', 'connect.', 'access.',
 ];
 const VPN_INFIX = ['.vpn.', '-vpn.'];
+// Title patterns that indicate a non-public page (mirrors the SQL title block)
 const BAD_TITLE_PATTERNS = [
+  // Auth / credential gates
   'login', 'log in', 'sign in', 'sign-in', 'request rejected', 'access denied',
-  'unauthorized', 'default website', 'welcome to iis', 'welcome to default',
+  'unauthorized', 'invalid credentials', 'authentication required', 'please authenticate',
+  'two-factor', 'two factor', 'multi-factor',
+  // Access-restriction banners
+  'internal access', 'internal use only', 'for internal use', 'internal only',
+  'restricted access', 'for authorized personnel', 'authorized users only',
+  'employees only', 'staff only', 'for official use only',
+  // FTP / file browsers
+  'index of /', 'directory listing', 'parent directory',
+  'ftp server', 'file browser', 'webdav',
+  // Error pages
+  'service unavailable', 'bad gateway', 'temporarily unavailable',
+  'site is offline', 'under maintenance',
+  // Generic server / infrastructure pages
+  'default website', 'welcome to iis', 'welcome to default',
   'outlook', 'webmail', 'forbidden', 'page not found',
-  'it security', 'authorized users only', 'computer fraud',
-  'information systems security', 'max.gov', 'max portal', 'maxportal',
-  'max auth', 'maxauth', 'omb max',
+  // Operations / support-desk portals
+  'operations portal', 'operations center', 'network operations',
+  'security operations center', 'ops portal',
+  'help desk', 'helpdesk', 'service desk', 'servicedesk',
+  // Vendor-specific internal tools
+  'vmware', 'horizon view', 'workspace one', 'jira service', 'servicenow',
+  // IT security banners
+  'it security', 'unauthorized access is prohibited', 'computer fraud',
+  'information systems security',
+  // MAX.gov / OMB collaboration portals
+  'max.gov', 'max portal', 'maxportal', 'max auth', 'maxauth', 'omb max',
+  // Git / version-control auth screens
   'gitlab', 'gitea', 'gogs', 'sign in · git',
+  // VPN / remote-access product login screens
   'vpn', 'anyconnect', 'ssl vpn', 'webvpn', 'citrix',
   'pulse secure', 'globalprotect', 'remote access', 'juniper network',
 ];
@@ -131,15 +165,31 @@ function computeIsPublic(domain: string, scan: ScanResult): 0 | 1 {
   const isLogin    = ts?.login_gate === true;
   const title      = (ts?.title ?? '').toLowerCase();
 
+  // Must be live, not a redirect, and return 200
   if (!isLive || isRedirect) return 0;
   if (statusCode !== null && statusCode !== 200) return 0;
   if (isLogin) return 0;
 
+  // base_domain check: must be a .gov domain
+  // The domain parameter IS the full domain; all .gov subdomains end in .gov
+  if (!domain.toLowerCase().endsWith('.gov')) return 0;
+
+  // Auth-credential errors on sitemap / robots indicate a gated site.
+  // www_scan_status is a GSA field not available at scan time — covered by live check above.
+  const sitemapStatus = (scan.sitemap as any)?.status_code;
+  const robotsStatus  = (scan.robots as any)?.status_code;
+  if (sitemapStatus === 401 || sitemapStatus === 403) return 0;
+  if (robotsStatus  === 401 || robotsStatus  === 403) return 0;
+
+  // Domain-pattern checks
   const d = domain.toLowerCase();
   if (NON_PROD_PREFIXES.some(p => d.startsWith(p))) return 0;
   if (NON_PROD_INFIX.some(p => d.includes(p))) return 0;
+  if (INTERNAL_PREFIXES.some(p => d.startsWith(p))) return 0;
   if (VPN_PREFIXES.some(p => d.startsWith(p))) return 0;
   if (VPN_INFIX.some(p => d.includes(p))) return 0;
+
+  // Title-pattern checks
   if (title && BAD_TITLE_PATTERNS.some(p => title.includes(p))) return 0;
 
   return 1;
