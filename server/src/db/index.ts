@@ -368,11 +368,17 @@ export async function initDb(): Promise<void> {
   await createIndex('idx_sites_city',      'sites', 'city', 100);
   await createIndex('idx_sites_is_public', 'sites', 'is_public');
 
-  // Backfill is_public for rows not yet rescanned.
-  // Uses PUBLIC_ONLY_CONDITION so existing domain/title data is respected.
-  // Only touches NULL rows — idempotent after first startup.
-  await pool.query(`UPDATE sites SET is_public = 1 WHERE is_public IS NULL AND ${PUBLIC_ONLY_CONDITION}`);
-  await pool.query(`UPDATE sites SET is_public = 0 WHERE is_public IS NULL`);
+  // Re-evaluate is_public for ALL rows on every startup using the current PUBLIC_ONLY_CONDITION.
+  // CASE WHEN is a single atomic query — no temporary-zero window, safe for live traffic.
+  // This ensures any tightening of the public definition takes effect immediately on deploy
+  // without waiting for a full rescan. The 2AM scheduled rescan will further refine values
+  // for conditions that require a live HTTP check (login_gate, sitemap/robots auth codes).
+  const [isPublicResult] = await pool.query(
+    `UPDATE sites SET is_public = CASE WHEN ${PUBLIC_ONLY_CONDITION} THEN 1 ELSE 0 END`
+  ) as any;
+  if ((isPublicResult.affectedRows ?? 0) > 0) {
+    console.log(`  re-evaluated is_public for ${isPublicResult.affectedRows} site(s)`);
+  }
 
   // Mark any scan sessions that were left in 'running' state by a previous server process
   // as 'stopped' — they can never complete now that the process is gone.
