@@ -136,6 +136,9 @@ export const sites = mysqlTable('sites', {
   // Mirrors PUBLIC_ONLY_CONDITION logic but stored for fast indexed lookups.
   // Orthogonal to `excluded` — combine as: is_public = 1 AND excluded = 0
   is_public: int('is_public'),
+  // Primary reason is_public = 0, e.g. "not live", "title: login", "non-production subdomain".
+  // NULL when is_public = 1 or not yet evaluated.
+  is_public_reason: varchar('is_public_reason', { length: 255 }),
 }, (table) => ({
   agencyIdx: index('idx_sites_agency').on(table.agency),
   bureauIdx: index('idx_sites_bureau').on(table.bureau),

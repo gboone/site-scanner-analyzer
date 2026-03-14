@@ -134,6 +134,8 @@ export interface SiteRecord {
   excluded?: number | null;
   /** Computed during rescan: 1 = public-facing, 0 = internal/non-prod, null = not yet evaluated */
   is_public?: number | null;
+  /** Primary reason is_public was set to 0, e.g. "not live", "title: login", "non-production subdomain" */
+  is_public_reason?: string | null;
 }
 
 // ─── Scan result types ─────────────────────────────────────────────────────

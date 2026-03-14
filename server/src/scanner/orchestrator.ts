@@ -153,7 +153,12 @@ const BAD_TITLE_PATTERNS = [
   'pulse secure', 'globalprotect', 'remote access', 'juniper network',
 ];
 
-function computeIsPublic(domain: string, scan: ScanResult): 0 | 1 {
+interface IsPublicResult {
+  is_public: 0 | 1;
+  reason: string | null;
+}
+
+function computeIsPublic(domain: string, scan: ScanResult): IsPublicResult {
   const rc = scan.redirect_chain as any;
   const ts = scan.tech_stack as any;
 
@@ -166,33 +171,45 @@ function computeIsPublic(domain: string, scan: ScanResult): 0 | 1 {
   const title      = (ts?.title ?? '').toLowerCase();
 
   // Must be live, not a redirect, and return 200
-  if (!isLive || isRedirect) return 0;
-  if (statusCode !== null && statusCode !== 200) return 0;
-  if (isLogin) return 0;
+  if (!isLive)              return { is_public: 0, reason: 'not live' };
+  if (isRedirect)           return { is_public: 0, reason: 'redirect' };
+  if (statusCode !== null && statusCode !== 200)
+                            return { is_public: 0, reason: `HTTP ${statusCode}` };
+  if (isLogin)              return { is_public: 0, reason: 'login gate detected' };
 
   // base_domain check: must be a .gov domain
   // The domain parameter IS the full domain; all .gov subdomains end in .gov
-  if (!domain.toLowerCase().endsWith('.gov')) return 0;
+  if (!domain.toLowerCase().endsWith('.gov'))
+                            return { is_public: 0, reason: `domain not .gov: ${domain}` };
 
   // Auth-credential errors on sitemap / robots indicate a gated site.
   // www_scan_status is a GSA field not available at scan time — covered by live check above.
   const sitemapStatus = (scan.sitemap as any)?.status_code;
   const robotsStatus  = (scan.robots as any)?.status_code;
-  if (sitemapStatus === 401 || sitemapStatus === 403) return 0;
-  if (robotsStatus  === 401 || robotsStatus  === 403) return 0;
+  if (sitemapStatus === 401 || sitemapStatus === 403)
+                            return { is_public: 0, reason: 'sitemap requires credentials' };
+  if (robotsStatus  === 401 || robotsStatus  === 403)
+                            return { is_public: 0, reason: 'robots.txt requires credentials' };
 
   // Domain-pattern checks
   const d = domain.toLowerCase();
-  if (NON_PROD_PREFIXES.some(p => d.startsWith(p))) return 0;
-  if (NON_PROD_INFIX.some(p => d.includes(p))) return 0;
-  if (INTERNAL_PREFIXES.some(p => d.startsWith(p))) return 0;
-  if (VPN_PREFIXES.some(p => d.startsWith(p))) return 0;
-  if (VPN_INFIX.some(p => d.includes(p))) return 0;
+  if (INTERNAL_PREFIXES.some(p => d.startsWith(p))) {
+    const prefix = INTERNAL_PREFIXES.find(p => d.startsWith(p))!;
+    const isEmail = ['mail.', 'webmail.', 'owa.', 'exchange.'].includes(prefix);
+    return { is_public: 0, reason: isEmail ? 'email/webmail subdomain' : 'file transfer subdomain' };
+  }
+  if (d.startsWith('horizon.'))
+                            return { is_public: 0, reason: 'virtual desktop subdomain' };
+  if (VPN_PREFIXES.some(p => d.startsWith(p)) || VPN_INFIX.some(p => d.includes(p)))
+                            return { is_public: 0, reason: 'VPN/remote access subdomain' };
+  if (NON_PROD_PREFIXES.some(p => d.startsWith(p)) || NON_PROD_INFIX.some(p => d.includes(p)))
+                            return { is_public: 0, reason: 'non-production subdomain' };
 
   // Title-pattern checks
-  if (title && BAD_TITLE_PATTERNS.some(p => title.includes(p))) return 0;
+  if (title && BAD_TITLE_PATTERNS.some(p => title.includes(p)))
+                            return { is_public: 0, reason: 'excluded by title or domain pattern' };
 
-  return 1;
+  return { is_public: 1, reason: null };
 }
 
 const BOT_CHALLENGE_TITLE_PATTERNS = [
@@ -357,7 +374,9 @@ export async function scanAndStore(domain: string, url: string): Promise<{ scan_
     }
   }
 
-  updates.is_public = computeIsPublic(domain, scan_result);
+  const { is_public, reason: is_public_reason } = computeIsPublic(domain, scan_result);
+  updates.is_public = is_public;
+  updates.is_public_reason = is_public_reason;
   updates.last_scan_id = scan_id;
   const cols = Object.keys(updates).filter(k => k !== 'domain');
   const setClause = cols.map(k => `\`${k}\` = :${k}`).join(', ');

@@ -96,6 +96,70 @@ export async function transaction<T>(
 }
 
 // ---------------------------------------------------------------------------
+// is_public / is_public_reason bulk refresh
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-evaluate is_public and is_public_reason for every row in the sites table.
+ *
+ * Called:
+ *   - At server startup (inside initDb) to immediately correct stale values.
+ *   - After a GSA import, because www_scan_status / sitemap_xml_scan_status /
+ *     robots_txt_scan_status / base_domain may have changed.
+ */
+export async function refreshIsPublic(): Promise<void> {
+  // Pass 1 — set is_public for every row using the shared SQL condition.
+  const [res] = await pool.query(
+    `UPDATE sites SET is_public = CASE WHEN ${PUBLIC_ONLY_CONDITION} THEN 1 ELSE 0 END`
+  ) as any;
+  console.log(`  refreshIsPublic: updated ${res.affectedRows} rows`);
+
+  // Pass 2 — set is_public_reason.
+  //   Public sites  → NULL (no reason needed).
+  //   Non-public    → prioritised human-readable string, mirroring the SQL condition order.
+  await pool.query(`
+    UPDATE sites SET is_public_reason = CASE
+      WHEN ${PUBLIC_ONLY_CONDITION} THEN NULL
+      WHEN live IS NULL OR live = 0                              THEN 'not live'
+      WHEN redirect = 1                                          THEN 'redirect'
+      WHEN status_code IS NOT NULL AND status_code != 200        THEN CONCAT('HTTP ', status_code)
+      WHEN base_domain IS NOT NULL AND base_domain NOT LIKE '%.gov'
+                                                                 THEN CONCAT('domain not .gov: ', base_domain)
+      WHEN www_scan_status IS NOT NULL AND www_scan_status != 'completed'
+                                                                 THEN CONCAT('www_scan_status: ', www_scan_status)
+      WHEN sitemap_xml_scan_status = 'invalid_auth_credentials'  THEN 'sitemap requires credentials'
+      WHEN robots_txt_scan_status  = 'invalid_auth_credentials'  THEN 'robots.txt requires credentials'
+      WHEN domain LIKE 'ftp.%'  OR domain LIKE 'sftp.%'
+        OR domain LIKE 'files.%' OR domain LIKE 'sharefiles.%'  THEN 'file transfer subdomain'
+      WHEN domain LIKE 'mail.%' OR domain LIKE 'webmail.%'
+        OR domain LIKE 'owa.%'  OR domain LIKE 'exchange.%'     THEN 'email/webmail subdomain'
+      WHEN domain LIKE 'horizon.%'                               THEN 'virtual desktop subdomain'
+      WHEN domain LIKE 'vpn.%'     OR domain LIKE 'vpngateway.%'
+        OR domain LIKE 'webvpn.%'  OR domain LIKE 'sslvpn.%'
+        OR domain LIKE 'remote.%'  OR domain LIKE 'citrix.%'
+        OR domain LIKE 'pulse.%'   OR domain LIKE 'anyconnect.%'
+        OR domain LIKE 'connect.%' OR domain LIKE 'access.%'
+        OR domain LIKE '%.vpn.%'   OR domain LIKE '%-vpn.%'     THEN 'VPN/remote access subdomain'
+      WHEN domain LIKE 'staging.%' OR domain LIKE 'uat.%'
+        OR domain LIKE 'test.%'    OR domain LIKE 'dev.%'
+        OR domain LIKE 'demo.%'    OR domain LIKE 'qa.%'
+        OR domain LIKE 'stg.%'     OR domain LIKE 'sit.%'
+        OR domain LIKE 'preprod.%' OR domain LIKE 'pre-prod.%'
+        OR domain LIKE 'sandbox.%' OR domain LIKE 'training.%'
+        OR domain LIKE 'www-test.%' OR domain LIKE 'www-dev.%'  OR domain LIKE 'www-stg.%'
+        OR domain LIKE '%.staging.%' OR domain LIKE '%.uat.%'
+        OR domain LIKE '%.test.%'  OR domain LIKE '%.dev.%'
+        OR domain LIKE '%.demo.%'  OR domain LIKE '%.qa.%'
+        OR domain LIKE '%.stg.%'
+        OR domain LIKE '%-staging.%' OR domain LIKE '%-uat.%'
+        OR domain LIKE '%-test.%'  OR domain LIKE '%-dev.%'
+        OR domain LIKE '%-demo.%'                                THEN 'non-production subdomain'
+      ELSE 'excluded by title or domain pattern'
+    END
+  `);
+}
+
+// ---------------------------------------------------------------------------
 // Schema bootstrap — idempotent, runs at startup
 // ---------------------------------------------------------------------------
 export async function initDb(): Promise<void> {
@@ -359,6 +423,7 @@ export async function initDb(): Promise<void> {
   await addCol('security_header_xss');
   await addCol('excluded', 'INTEGER');
   await addCol('is_public', 'INTEGER');
+  await addCol('is_public_reason', 'VARCHAR(255)');
 
   // get.gov registry fields
   await addCol('city', 'VARCHAR(100)');
@@ -368,17 +433,8 @@ export async function initDb(): Promise<void> {
   await createIndex('idx_sites_city',      'sites', 'city', 100);
   await createIndex('idx_sites_is_public', 'sites', 'is_public');
 
-  // Re-evaluate is_public for ALL rows on every startup using the current PUBLIC_ONLY_CONDITION.
-  // CASE WHEN is a single atomic query — no temporary-zero window, safe for live traffic.
-  // This ensures any tightening of the public definition takes effect immediately on deploy
-  // without waiting for a full rescan. The 2AM scheduled rescan will further refine values
-  // for conditions that require a live HTTP check (login_gate, sitemap/robots auth codes).
-  const [isPublicResult] = await pool.query(
-    `UPDATE sites SET is_public = CASE WHEN ${PUBLIC_ONLY_CONDITION} THEN 1 ELSE 0 END`
-  ) as any;
-  if ((isPublicResult.affectedRows ?? 0) > 0) {
-    console.log(`  re-evaluated is_public for ${isPublicResult.affectedRows} site(s)`);
-  }
+  // Re-evaluate is_public + is_public_reason for ALL rows on startup.
+  await refreshIsPublic();
 
   // Mark any scan sessions that were left in 'running' state by a previous server process
   // as 'stopped' — they can never complete now that the process is gone.
