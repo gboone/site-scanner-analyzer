@@ -10,7 +10,7 @@
  */
 
 import cron, { type ScheduledTask } from 'node-cron';
-import { query, execute } from './db';
+import { query, execute, refreshIsPublic } from './db';
 import { importFromGsa, type GsaImportResult } from './routes/gsa';
 import { importFromGetGov } from './routes/getgov';
 import { scanAndStore } from './scanner/orchestrator';
@@ -145,6 +145,14 @@ export async function runGsaRefresh(): Promise<void> {
     const status = `ok: ${result.inserted} inserted, ${result.updated} updated`;
     await writeSetting('SCHEDULER_GSA_LAST_STATUS', status);
     console.log(`[scheduler] GSA refresh complete — ${status}`);
+
+    // Re-evaluate is_public / is_public_reason now that GSA fields are fresh.
+    try {
+      console.log('[scheduler] refreshing is_public after GSA import…');
+      await refreshIsPublic();
+    } catch (refreshErr: any) {
+      console.error('[scheduler] refreshIsPublic failed after GSA refresh:', refreshErr.message);
+    }
   } catch (err: any) {
     const status = `error: ${err.message}`;
     await writeSetting('SCHEDULER_GSA_LAST_STATUS', status).catch(() => {});

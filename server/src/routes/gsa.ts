@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { config } from '../config';
-import { query, transaction, toPositional } from '../db';
+import { query, transaction, toPositional, refreshIsPublic } from '../db';
 import { sanitizeSingleLine, sanitizeMultiLine } from '../utils/sanitize';
 
 const router = Router();
@@ -414,6 +414,13 @@ router.post('/import', async (req: Request, res: Response) => {
         send({ type: 'progress', page, totalPages: totalPagesForResponse, inserted, updated });
       },
     });
+
+    // Re-evaluate is_public / is_public_reason now that GSA fields are fresh.
+    try {
+      await refreshIsPublic();
+    } catch (refreshErr: any) {
+      console.error('[gsa] refreshIsPublic failed after import:', refreshErr.message);
+    }
 
     res.end(
       JSON.stringify({
