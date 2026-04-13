@@ -168,6 +168,19 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [selectedDomains, setSelectedDomains] = React.useState<Set<string>>(new Set());
   const [selectAllLoading, setSelectAllLoading] = React.useState(false);
   const [exportLoading, setExportLoading] = React.useState(false);
+  const [exportModalOpen, setExportModalOpen] = React.useState(false);
+  const exportModalRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!exportModalOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (exportModalRef.current && !exportModalRef.current.contains(e.target as Node)) {
+        setExportModalOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [exportModalOpen]);
 
   const { data: scanSessions } = useScanSessions();
 
@@ -336,8 +349,9 @@ export default function ExplorerView({ onNavigate }: Props) {
   };
 
   /** Download selected rows as structured JSON for use with Glean or other tools */
-  const exportSelected = async () => {
+  const exportSelected = async (mode: 'full' | 'simplified') => {
     if (exportLoading) return;
+    setExportModalOpen(false);
     setExportLoading(true);
     try {
       const result = await api.getSites({
@@ -355,6 +369,8 @@ export default function ExplorerView({ onNavigate }: Props) {
       const rows = allMatchingRows.filter((r: any) => selectedDomains.has(String(r.domain)));
       if (rows.length === 0) return;
 
+      const domains = mode === 'simplified' ? simplifyRows(rows) : rows;
+
       const agencies = [...new Set(rows.map((r: any) => r.agency).filter(Boolean))];
       const bureaus  = [...new Set(rows.map((r: any) => r.bureau).filter(Boolean))];
 
@@ -364,20 +380,147 @@ export default function ExplorerView({ onNavigate }: Props) {
           : agencies.length === 0 ? null : 'Multiple agencies',
         bureaus_and_offices: bureaus,
         exported_at: new Date().toISOString(),
-        total: rows.length,
-        domains: rows,
+        total: domains.length,
+        domains,
       };
 
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sites-export-${Date.now()}.json`;
+      a.download = `sites-export-${mode}-${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
       setExportLoading(false);
     }
+  };
+
+  /**
+   * Extract the registrable domain (eTLD+1) from a URL string.
+   * e.g. "https://2feda3c31a53.w.hcaptcha.com/logo.png" → "hcaptcha.com"
+   * Falls back to the raw string if parsing fails.
+   */
+  const extractRootDomain = (url: string): string => {
+    try {
+      const { hostname } = new URL(url);
+      const parts = hostname.split('.');
+      // Handle multi-part TLDs for common country-code second-levels (e.g. .co.uk, .gov.uk)
+      const knownSecondLevel = new Set(['co', 'gov', 'org', 'net', 'edu', 'ac', 'com', 'ltd', 'me']);
+      if (parts.length >= 3 && knownSecondLevel.has(parts[parts.length - 2])) {
+        return parts.slice(-3).join('.');
+      }
+      return parts.slice(-2).join('.');
+    } catch {
+      return url;
+    }
+  };
+
+  /**
+   * Strip always-null, always-empty, and constant fields from exported rows.
+   * Stringified JSON arrays are parsed into real arrays; null/constant arrays are dropped.
+   * URL arrays are collapsed to unique root domains.
+   */
+  const simplifyRows = (rows: any[]): any[] => {
+    if (rows.length === 0) return rows;
+
+    // First pass: parse any stringified JSON fields into real values
+    const parsed = rows.map((row) => {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(row)) {
+        if (typeof v === 'string' && v.startsWith('[')) {
+          try { out[k] = JSON.parse(v); } catch { out[k] = v; }
+        } else {
+          out[k] = v;
+        }
+      }
+      return out;
+    });
+
+    // Collect all keys
+    const keys = Object.keys(parsed[0]);
+
+    // Determine which keys to keep
+    const keepKeys = keys.filter((k) => {
+      const values = parsed.map((r) => r[k]);
+
+      // Drop if every value is null, undefined, or empty string
+      const isAlwaysEmpty = values.every(
+        (v) => v === null || v === undefined || v === ''
+      );
+      if (isAlwaysEmpty) return false;
+
+      // For arrays: drop if every value is null/empty/[]
+      const isAlwaysEmptyArray = values.every(
+        (v) => v === null || v === undefined || (Array.isArray(v) && v.length === 0)
+      );
+      if (isAlwaysEmptyArray) return false;
+
+      // Drop if every value is identical (constant field)
+      const first = JSON.stringify(values[0]);
+      const isConstant = values.every((v) => JSON.stringify(v) === first);
+      if (isConstant) return false;
+
+      return true;
+    });
+
+    // Drop prefix groups (e.g. uswds_*) where every field in the group is 0 across all rows.
+    // A "group" requires at least 2 fields sharing the same prefix (text before the first _).
+    const prefixGroups = new Map<string, string[]>();
+    for (const k of keepKeys) {
+      const prefix = k.includes('_') ? k.slice(0, k.indexOf('_')) : null;
+      if (!prefix) continue;
+      if (!prefixGroups.has(prefix)) prefixGroups.set(prefix, []);
+      prefixGroups.get(prefix)!.push(k);
+    }
+    const zeroedPrefixes = new Set<string>();
+    for (const [prefix, fields] of prefixGroups) {
+      if (fields.length < 2) continue;
+      const allZero = fields.every((k) =>
+        parsed.every((row) => row[k] === 0)
+      );
+      if (allZero) zeroedPrefixes.add(prefix);
+    }
+    const prunedKeys = zeroedPrefixes.size > 0
+      ? keepKeys.filter((k) => {
+          const prefix = k.includes('_') ? k.slice(0, k.indexOf('_')) : null;
+          return !prefix || !zeroedPrefixes.has(prefix);
+        })
+      : keepKeys;
+
+    // Second pass: apply URL→root-domain collapse to produce transformed values per key
+    const transformed: Record<string, unknown[]> = {};
+    for (const k of prunedKeys) {
+      transformed[k] = parsed.map((row) => {
+        const v = row[k];
+        if (
+          Array.isArray(v) &&
+          v.length > 0 &&
+          v.every((item) => typeof item === 'string' && /^https?:\/\//.test(item))
+        ) {
+          return [...new Set(v.map(extractRootDomain))];
+        }
+        return v;
+      });
+    }
+
+    // Third pass: drop fields whose transformed values are identical to an already-kept field.
+    // This removes redundant pairs like third_party_service_urls vs third_party_service_domains
+    // once both have been collapsed to the same root-domain list.
+    const seenSignatures = new Set<string>();
+    const finalKeys = prunedKeys.filter((k) => {
+      const signature = JSON.stringify(transformed[k]);
+      if (seenSignatures.has(signature)) return false;
+      seenSignatures.add(signature);
+      return true;
+    });
+
+    // Fourth pass: project final keys using transformed values
+    return parsed.map((row, i) => {
+      const out: Record<string, unknown> = {};
+      for (const k of finalKeys) out[k] = transformed[k][i];
+      return out;
+    });
   };
 
   /** Navigate to the Dashboard report builder scoped to the current selection. */
@@ -592,9 +735,34 @@ export default function ExplorerView({ onNavigate }: Props) {
               <span aria-hidden="true">✓ </span>{selectedDomains.size.toLocaleString()} selected
               {selectedOnPage < selectedDomains.size && ` (${selectedOnPage} on this page)`}
             </span>
-            <button onClick={exportSelected} disabled={scan.running || exportLoading} className="btn-primary text-xs py-0.5 px-2">
-              {exportLoading ? 'Exporting…' : <>Export JSON <span aria-hidden="true">↓</span></>}
-            </button>
+            <div className="relative" ref={exportModalRef}>
+              <button
+                onClick={() => setExportModalOpen((o) => !o)}
+                disabled={scan.running || exportLoading}
+                className="btn-primary text-xs py-0.5 px-2"
+              >
+                {exportLoading ? 'Exporting…' : <>Export JSON <span aria-hidden="true">↓</span></>}
+              </button>
+              {exportModalOpen && (
+                <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded shadow-lg text-xs w-56">
+                  <div className="px-3 py-2 border-b border-gray-100 text-gray-500 font-medium">Choose export format</div>
+                  <button
+                    className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-gray-100"
+                    onClick={() => exportSelected('full')}
+                  >
+                    <div className="font-medium text-gray-800">Full export</div>
+                    <div className="text-gray-400 mt-0.5">All fields as-is</div>
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-2 hover:bg-blue-50"
+                    onClick={() => exportSelected('simplified')}
+                  >
+                    <div className="font-medium text-gray-800">Simplified export</div>
+                    <div className="text-gray-400 mt-0.5">Drops null, constant &amp; redundant fields; parses JSON arrays</div>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={generateDashboardReport}
               disabled={scan.running}
