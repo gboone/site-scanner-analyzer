@@ -375,11 +375,13 @@ export default function ExplorerView({ onNavigate }: Props) {
     const { payload, mode, chunkCount } = modal;
     const chunkSize = Math.ceil(payload.domains.length / chunkCount);
     const ts = Date.now();
+    // Stagger downloads by 100ms each to avoid the browser's ~10 simultaneous
+    // download cap silently dropping files beyond the limit.
     for (let i = 0; i < chunkCount; i++) {
       const slice = payload.domains.slice(i * chunkSize, (i + 1) * chunkSize);
       const chunkPayload = { ...payload, total: slice.length, domains: slice, part: i + 1, parts: chunkCount };
       const json = mode === 'simplified' ? JSON.stringify(chunkPayload) : JSON.stringify(chunkPayload, null, 2);
-      triggerDownload(json, `sites-export-${mode}-${ts}-part${i + 1}of${chunkCount}.json`);
+      setTimeout(() => triggerDownload(json, `sites-export-${mode}-${ts}-part${i + 1}of${chunkCount}.json`), i * 100);
     }
     setExportSizeModal(null);
   };
