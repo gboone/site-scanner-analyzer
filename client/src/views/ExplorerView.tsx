@@ -167,6 +167,7 @@ export default function ExplorerView({ onNavigate }: Props) {
   // Bulk selection state
   const [selectedDomains, setSelectedDomains] = React.useState<Set<string>>(new Set());
   const [selectAllLoading, setSelectAllLoading] = React.useState(false);
+  const [exportLoading, setExportLoading] = React.useState(false);
 
   const { data: scanSessions } = useScanSessions();
 
@@ -335,31 +336,48 @@ export default function ExplorerView({ onNavigate }: Props) {
   };
 
   /** Download selected rows as structured JSON for use with Glean or other tools */
-  const exportSelected = () => {
-    const allRows: any[] = data?.data || [];
-    const rows = allRows.filter((r: any) => selectedDomains.has(String(r.domain)));
-    if (rows.length === 0) return;
+  const exportSelected = async () => {
+    if (exportLoading) return;
+    setExportLoading(true);
+    try {
+      const result = await api.getSites({
+        ...filters,
+        ...(agencyFilter ? { agency: agencyFilter } : {}),
+        ...(bureauFilter ? { bureau: bureauFilter } : {}),
+        ...(domainTypeFilter ? { branch: domainTypeFilter } : {}),
+        ...(stateFilter ? { state: stateFilter } : {}),
+        page: 1,
+        limit: 5000,
+        sort: groupByFinalDomain ? 'final_domain' : sort,
+        order: groupByFinalDomain ? 'asc' : order,
+      }) as any;
+      const allMatchingRows: any[] = result?.data || [];
+      const rows = allMatchingRows.filter((r: any) => selectedDomains.has(String(r.domain)));
+      if (rows.length === 0) return;
 
-    const agencies = [...new Set(rows.map((r: any) => r.agency).filter(Boolean))];
-    const bureaus  = [...new Set(rows.map((r: any) => r.bureau).filter(Boolean))];
+      const agencies = [...new Set(rows.map((r: any) => r.agency).filter(Boolean))];
+      const bureaus  = [...new Set(rows.map((r: any) => r.bureau).filter(Boolean))];
 
-    const payload = {
-      agency: agencies.length === 1
-        ? agencies[0]
-        : agencies.length === 0 ? null : 'Multiple agencies',
-      bureaus_and_offices: bureaus,
-      exported_at: new Date().toISOString(),
-      total: selectedDomains.size,
-      domains: rows,
-    };
+      const payload = {
+        agency: agencies.length === 1
+          ? agencies[0]
+          : agencies.length === 0 ? null : 'Multiple agencies',
+        bureaus_and_offices: bureaus,
+        exported_at: new Date().toISOString(),
+        total: rows.length,
+        domains: rows,
+      };
 
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sites-export-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sites-export-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   /** Navigate to the Dashboard report builder scoped to the current selection. */
@@ -574,8 +592,8 @@ export default function ExplorerView({ onNavigate }: Props) {
               <span aria-hidden="true">✓ </span>{selectedDomains.size.toLocaleString()} selected
               {selectedOnPage < selectedDomains.size && ` (${selectedOnPage} on this page)`}
             </span>
-            <button onClick={exportSelected} disabled={scan.running} className="btn-primary text-xs py-0.5 px-2">
-              Export JSON <span aria-hidden="true">↓</span>
+            <button onClick={exportSelected} disabled={scan.running || exportLoading} className="btn-primary text-xs py-0.5 px-2">
+              {exportLoading ? 'Exporting…' : <>Export JSON <span aria-hidden="true">↓</span></>}
             </button>
             <button
               onClick={generateDashboardReport}
