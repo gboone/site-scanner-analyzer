@@ -169,6 +169,14 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [selectAllLoading, setSelectAllLoading] = React.useState(false);
   const [exportLoading, setExportLoading] = React.useState(false);
   const [exportModalOpen, setExportModalOpen] = React.useState(false);
+  const [exportSizeModal, setExportSizeModal] = React.useState<{
+    json: string;
+    filename: string;
+    sizeBytes: number;
+    chunkCount: number;
+    payload: { agency: any; bureaus_and_offices: string[]; exported_at: string; total: number; domains: any[] };
+    mode: 'full' | 'simplified';
+  } | null>(null);
   const exportModalRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -348,6 +356,34 @@ export default function ExplorerView({ onNavigate }: Props) {
     startScan({ domains, siteMap, label: 'Bulk rescan' });
   };
 
+  const formatBytes = (b: number) =>
+    b >= 1_000_000 ? `${(b / 1_000_000).toFixed(1)} MB`
+    : b >= 1_000   ? `${(b / 1_000).toFixed(1)} KB`
+    : `${b} B`;
+
+  const triggerDownload = (json: string, filename: string) => {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadChunked = (modal: NonNullable<typeof exportSizeModal>) => {
+    const { payload, mode, chunkCount } = modal;
+    const chunkSize = Math.ceil(payload.domains.length / chunkCount);
+    const ts = Date.now();
+    for (let i = 0; i < chunkCount; i++) {
+      const slice = payload.domains.slice(i * chunkSize, (i + 1) * chunkSize);
+      const chunkPayload = { ...payload, total: slice.length, domains: slice, part: i + 1, parts: chunkCount };
+      const json = mode === 'simplified' ? JSON.stringify(chunkPayload) : JSON.stringify(chunkPayload, null, 2);
+      triggerDownload(json, `sites-export-${mode}-${ts}-part${i + 1}of${chunkCount}.json`);
+    }
+    setExportSizeModal(null);
+  };
+
   /** Download selected rows as structured JSON for use with Glean or other tools */
   const exportSelected = async (mode: 'full' | 'simplified') => {
     if (exportLoading) return;
@@ -385,13 +421,16 @@ export default function ExplorerView({ onNavigate }: Props) {
       };
 
       const json = mode === 'simplified' ? JSON.stringify(payload) : JSON.stringify(payload, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `sites-export-${mode}-${Date.now()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const sizeBytes = new Blob([json]).size;
+      const filename = `sites-export-${mode}-${Date.now()}.json`;
+
+      if (sizeBytes > 300_000) {
+        const chunkCount = Math.ceil(sizeBytes / 300_000);
+        setExportSizeModal({ json, filename, sizeBytes, chunkCount, payload, mode });
+        return;
+      }
+
+      triggerDownload(json, filename);
     } finally {
       setExportLoading(false);
     }
@@ -761,6 +800,41 @@ export default function ExplorerView({ onNavigate }: Props) {
                     <div className="font-medium text-gray-800">Simplified export</div>
                     <div className="text-gray-400 mt-0.5">Drops null, constant &amp; redundant fields; parses JSON arrays</div>
                   </button>
+                </div>
+              )}
+              {exportSizeModal && (
+                <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded shadow-lg text-xs w-72">
+                  <div className="px-3 py-2 border-b border-gray-100 text-gray-700 font-medium">Export ready</div>
+                  <div className="px-3 py-2 space-y-1.5">
+                    <div className="text-gray-600">
+                      File size: <span className="font-medium text-gray-900">{formatBytes(exportSizeModal.sizeBytes)}</span>
+                    </div>
+                    <div className="text-amber-700 bg-amber-50 rounded px-2 py-1.5 leading-snug">
+                      This is larger than 300 KB. You can download it as one file or split it into{' '}
+                      <span className="font-medium">{exportSizeModal.chunkCount} smaller files</span>{' '}
+                      (~{formatBytes(Math.ceil(exportSizeModal.sizeBytes / exportSizeModal.chunkCount))} each).
+                    </div>
+                  </div>
+                  <div className="px-3 py-2 border-t border-gray-100 flex flex-col gap-1.5">
+                    <button
+                      className="w-full text-left px-2 py-1.5 rounded hover:bg-blue-50 text-blue-700 font-medium"
+                      onClick={() => { triggerDownload(exportSizeModal.json, exportSizeModal.filename); setExportSizeModal(null); }}
+                    >
+                      Download as one file
+                    </button>
+                    <button
+                      className="w-full text-left px-2 py-1.5 rounded hover:bg-blue-50 text-blue-700 font-medium"
+                      onClick={() => downloadChunked(exportSizeModal)}
+                    >
+                      Split into {exportSizeModal.chunkCount} files
+                    </button>
+                    <button
+                      className="w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-gray-500"
+                      onClick={() => setExportSizeModal(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
