@@ -35,16 +35,53 @@ router.get('/', async (req: Request, res: Response) => {
     params.search = `%${search}%`;
   }
 
-  // Quick filter chips
-  if (req.query.live === 'true') conditions.push('live = 1');
+  // Quick filter chips (tri-state: true = positive, false = inverse)
+  if (req.query.live === 'true')  conditions.push('live = 1');
   if (req.query.live === 'false') conditions.push('live = 0');
-  if (req.query.has_uswds === 'true') conditions.push('uswds_count > 0');
-  if (req.query.no_sitemap === 'true') conditions.push('sitemap_xml_detected = 0');
-  if (req.query.has_dap === 'true') conditions.push('dap = 1');
-  if (req.query.https_enforced === 'true') conditions.push('https_enforced = 1');
-  if (req.query.has_login === 'true') conditions.push('login_provider IS NOT NULL');
-  if (req.query.no_redirect === 'true') conditions.push('(redirect = 0 OR redirect IS NULL)');
+  if (req.query.has_uswds === 'true')  conditions.push('uswds_count > 0');
+  if (req.query.has_uswds === 'false') conditions.push('(uswds_count = 0 OR uswds_count IS NULL)');
+  if (req.query.no_sitemap === 'true')  conditions.push('sitemap_xml_detected = 0');
+  if (req.query.no_sitemap === 'false') conditions.push('sitemap_xml_detected = 1');
+  if (req.query.has_dap === 'true')  conditions.push('dap = 1');
+  if (req.query.has_dap === 'false') conditions.push('(dap = 0 OR dap IS NULL)');
+  if (req.query.https_enforced === 'true')  conditions.push('https_enforced = 1');
+  if (req.query.https_enforced === 'false') conditions.push('(https_enforced = 0 OR https_enforced IS NULL)');
+  if (req.query.has_login === 'true')  conditions.push('login_provider IS NOT NULL');
+  if (req.query.has_login === 'false') conditions.push('login_provider IS NULL');
+  if (req.query.no_redirect === 'true')  conditions.push('(redirect = 0 OR redirect IS NULL)');
+  if (req.query.no_redirect === 'false') conditions.push('redirect = 1');
   if (req.query.public_only === 'true') conditions.push(PUBLIC_ONLY_CONDITION);
+
+  // Column-level filters with match mode (contains / exact / excludes)
+  const cmsVal = req.query.cms as string || '';
+  const cmsMode = req.query.cms_mode as string || 'contains';
+  if (cmsVal) {
+    if (cmsMode === 'exact') {
+      conditions.push('cms = :cms');
+      params.cms = cmsVal;
+    } else if (cmsMode === 'excludes') {
+      conditions.push('(cms NOT LIKE :cms OR cms IS NULL)');
+      params.cms = `%${cmsVal}%`;
+    } else {
+      conditions.push('cms LIKE :cms');
+      params.cms = `%${cmsVal}%`;
+    }
+  }
+
+  const titleVal = req.query.title_filter as string || '';
+  const titleMode = req.query.title_mode as string || 'contains';
+  if (titleVal) {
+    if (titleMode === 'exact') {
+      conditions.push('title = :title_filter');
+      params.title_filter = titleVal;
+    } else if (titleMode === 'excludes') {
+      conditions.push('(title NOT LIKE :title_filter OR title IS NULL)');
+      params.title_filter = `%${titleVal}%`;
+    } else {
+      conditions.push('title LIKE :title_filter');
+      params.title_filter = `%${titleVal}%`;
+    }
+  }
   if (req.query.agency) {
     conditions.push('agency = :agency');
     params.agency = req.query.agency;

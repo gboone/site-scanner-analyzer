@@ -203,6 +203,28 @@ export default function ExplorerView({ onNavigate }: Props) {
   const [stateFilter, setStateFilter] = React.useState('');
   const { data: domainTypes = [] } = useQuery({ queryKey: ['domain-types'], queryFn: () => api.getDomainTypes() });
 
+  // Column-level filters
+  const [columnFiltersOpen, setColumnFiltersOpen] = React.useState(false);
+  const [cmsFilter, setCmsFilter] = React.useState('');
+  const [cmsMode, setCmsMode] = React.useState<'contains' | 'exact' | 'excludes'>('contains');
+  const [titleFilter, setTitleFilter] = React.useState('');
+  const [titleMode, setTitleMode] = React.useState<'contains' | 'exact' | 'excludes'>('contains');
+  const [debouncedCms, setDebouncedCms] = React.useState('');
+  const [debouncedTitle, setDebouncedTitle] = React.useState('');
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedCms(cmsFilter), 250);
+    return () => clearTimeout(t);
+  }, [cmsFilter]);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedTitle(titleFilter), 250);
+    return () => clearTimeout(t);
+  }, [titleFilter]);
+  const hasColumnFilters = !!(debouncedCms || debouncedTitle);
+  const clearColumnFilters = () => {
+    setCmsFilter(''); setCmsMode('contains');
+    setTitleFilter(''); setTitleMode('contains');
+  };
+
   // Overfetch to compensate for client-side hidden rows, capped at 100 total
   const fetchLimit = filters.show_hidden === 'true' ? 25 : Math.min(25 + hidden.size, 100);
 
@@ -215,6 +237,8 @@ export default function ExplorerView({ onNavigate }: Props) {
     ...(bureauFilter ? { bureau: bureauFilter } : {}),
     ...(domainTypeFilter ? { branch: domainTypeFilter } : {}),
     ...(stateFilter ? { state: stateFilter } : {}),
+    ...(debouncedCms ? { cms: debouncedCms, cms_mode: cmsMode } : {}),
+    ...(debouncedTitle ? { title_filter: debouncedTitle, title_mode: titleMode } : {}),
   };
   const { data, isLoading } = useSites(queryParams);
 
@@ -668,7 +692,89 @@ export default function ExplorerView({ onNavigate }: Props) {
             className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-14 shrink-0 font-mono"
             aria-label="Filter by state"
           />
+          <div className="h-4 w-px bg-gray-300 shrink-0" aria-hidden="true" />
+          <button
+            onClick={() => setColumnFiltersOpen((v) => !v)}
+            aria-expanded={columnFiltersOpen}
+            className={`text-xs px-2 py-0.5 rounded border transition-colors shrink-0 ${
+              columnFiltersOpen || hasColumnFilters
+                ? 'bg-gov-blue text-white border-gov-blue'
+                : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400 hover:text-gray-700'
+            }`}
+          >
+            {hasColumnFilters ? 'Column filters ✓' : 'Column filters'}
+          </button>
         </div>
+
+        {/* Column-level filters row */}
+        {columnFiltersOpen && (
+          <div className="flex items-center gap-x-3 gap-y-1.5 flex-wrap px-4 py-2 border-b border-gray-200 bg-blue-50">
+            <span className="text-xs text-gray-500 font-medium shrink-0">Filter columns:</span>
+
+            {/* CMS filter */}
+            <div className="flex items-center gap-1 shrink-0">
+              <label className="text-xs text-gray-500 shrink-0">CMS</label>
+              <select
+                value={cmsMode}
+                onChange={(e) => { setCmsMode(e.target.value as typeof cmsMode); setPage(1); }}
+                className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-700"
+                aria-label="CMS match mode"
+              >
+                <option value="contains">contains</option>
+                <option value="exact">is exactly</option>
+                <option value="excludes">excludes</option>
+              </select>
+              <input
+                type="text"
+                value={cmsFilter}
+                onChange={(e) => { setCmsFilter(e.target.value); setPage(1); }}
+                placeholder="e.g. WordPress"
+                className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-32"
+                aria-label="CMS filter value"
+              />
+              {cmsFilter && (
+                <button onClick={() => setCmsFilter('')} className="text-gray-400 hover:text-gray-600 text-xs" aria-label="Clear CMS filter">✕</button>
+              )}
+            </div>
+
+            <div className="h-4 w-px bg-gray-300 shrink-0" aria-hidden="true" />
+
+            {/* Page Title filter */}
+            <div className="flex items-center gap-1 shrink-0">
+              <label className="text-xs text-gray-500 shrink-0">Page Title</label>
+              <select
+                value={titleMode}
+                onChange={(e) => { setTitleMode(e.target.value as typeof titleMode); setPage(1); }}
+                className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-700"
+                aria-label="Page title match mode"
+              >
+                <option value="contains">contains</option>
+                <option value="exact">is exactly</option>
+                <option value="excludes">excludes</option>
+              </select>
+              <input
+                type="text"
+                value={titleFilter}
+                onChange={(e) => { setTitleFilter(e.target.value); setPage(1); }}
+                placeholder="e.g. Home"
+                className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-48"
+                aria-label="Page title filter value"
+              />
+              {titleFilter && (
+                <button onClick={() => setTitleFilter('')} className="text-gray-400 hover:text-gray-600 text-xs" aria-label="Clear page title filter">✕</button>
+              )}
+            </div>
+
+            {hasColumnFilters && (
+              <>
+                <div className="h-4 w-px bg-gray-300 shrink-0" aria-hidden="true" />
+                <button onClick={() => { clearColumnFilters(); setPage(1); }} className="text-xs text-gray-500 hover:text-gray-700 underline shrink-0">
+                  Clear column filters
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Personal hidden sites banner */}
         {hidden.size > 0 && filters.show_hidden !== 'true' && (
