@@ -12,13 +12,47 @@
  *
  * Both transports share the same createMcpServer() factory, so all 8 tools
  * are available on either endpoint — no duplication.
+ *
+ * Authentication: when MCP_SECRET is set (env var or settings table), all
+ * requests must include "Authorization: Bearer <token>". Without it the
+ * endpoints are open — useful for local dev but not recommended in production.
  */
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, RequestHandler } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { createMcpServer } from '../mcp/server';
+import { config } from '../config';
 
 const router = Router();
+
+// ---------------------------------------------------------------------------
+// Optional Bearer token auth
+// Applied to all routes on this router when MCP_SECRET is configured.
+// Uses the SDK's requireBearerAuth so the 401 response format matches the
+// MCP spec (WWW-Authenticate header included).
+// When MCP_SECRET is unset the middleware is a no-op — useful for local
+// dev, but set it in production.
+// ---------------------------------------------------------------------------
+
+const bearerAuth = requireBearerAuth({
+  verifier: {
+    verifyAccessToken: async (token: string) => {
+      const expected = config.mcpAuthToken;
+      if (token === expected) {
+        return { token, clientId: 'mcp-client', scopes: [] };
+      }
+      throw new Error('Invalid token');
+    },
+  },
+});
+
+// Checked at request time so changes via the settings UI take effect without
+// a restart.
+router.use((req, res, next) => {
+  if (!config.mcpAuthToken) return next();
+  return bearerAuth(req, res, next);
+});
 
 // ---------------------------------------------------------------------------
 // Streamable HTTP transport  (POST /mcp  +  GET /mcp)
