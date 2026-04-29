@@ -4,6 +4,7 @@ import { type ColumnDef } from '@tanstack/react-table';
 import { DataTable, type Table } from '../components/data-table/DataTable';
 import FilterChips from '../components/data-table/FilterChips';
 import ColumnToggle from '../components/data-table/ColumnToggle';
+import GroupByPicker from '../components/data-table/GroupByPicker';
 import Pagination from '../components/data-table/Pagination';
 import SiteDetail from '../components/site-detail/SiteDetail';
 import AgencyBureauFilter from '../components/AgencyBureauFilter';
@@ -12,6 +13,8 @@ import { useHiddenSites } from '../hooks/useHiddenSites';
 import { useUIStore } from '../store/uiStore';
 import { useScanQueue } from '../contexts/ScanQueueContext';
 import { api } from '../lib/api';
+import { COLUMN_CATALOG, FILTERABLE_TYPES, getColumnMeta } from '../lib/columnCatalog';
+import { useExplorerUrlSync } from '../hooks/useExplorerUrlSync';
 import type { View } from '../App';
 
 const STATUS_COLORS: Record<number, string> = {
@@ -19,7 +22,8 @@ const STATUS_COLORS: Record<number, string> = {
   403: 'badge-yellow', 404: 'badge-red', 500: 'badge-red',
 };
 
-const COLUMNS: ColumnDef<Record<string, unknown>, any>[] = [
+/** Default columns always present in the table */
+const BASE_COLUMNS: ColumnDef<Record<string, unknown>, any>[] = [
   {
     accessorKey: 'domain',
     header: 'Domain',
@@ -153,22 +157,35 @@ interface Props {
 
 export default function ExplorerView({ onNavigate }: Props) {
   const { scan, startScan, stopScan } = useScanQueue();
-  const { openDetail, selectedDomain, detailPanelOpen, setReport, setFilter } = useUIStore();
+  const { openDetail, selectedDomain, detailPanelOpen, setReport, setFilter, activeFilters } = useUIStore();
   const { hidden, hide, unhide, clearAll: clearAllHidden } = useHiddenSites();
-  const [page, setPage] = React.useState(1);
-  const [sort, setSort] = React.useState('domain');
-  const [order, setOrder] = React.useState('asc');
+
+  const { initial, syncExplorerState } = useExplorerUrlSync();
+
+  // Restore chip filters from URL on first mount (Zustand starts empty each session)
+  React.useEffect(() => {
+    for (const [k, v] of Object.entries(initial.activeFilters)) {
+      setFilter(k, v);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [page, setPage] = React.useState(initial.page);
+  const [sort, setSort] = React.useState(initial.sort);
+  const [order, setOrder] = React.useState(initial.order);
   const [filters, setFilters] = React.useState<Record<string, string>>({});
+  const [search, setSearch] = React.useState(initial.search);
   const [tableInstance, setTableInstance] = React.useState<Table<any> | null>(null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [schedulerStopStatus, setSchedulerStopStatus] = React.useState<string | null>(null);
-  const [groupByFinalDomain, setGroupByFinalDomain] = React.useState(false);
+  const [groupByField, setGroupByField] = React.useState<string | null>(initial.groupByField);
+  const [groupByOrder, setGroupByOrder] = React.useState<'asc' | 'desc'>(initial.groupByOrder);
 
   // Bulk selection state
   const [selectedDomains, setSelectedDomains] = React.useState<Set<string>>(new Set());
   const [selectAllLoading, setSelectAllLoading] = React.useState(false);
   const [exportLoading, setExportLoading] = React.useState(false);
   const [exportModalOpen, setExportModalOpen] = React.useState(false);
+  const [customChunkInput, setCustomChunkInput] = React.useState('');
   const [exportSizeModal, setExportSizeModal] = React.useState<{
     json: string;
     filename: string;
@@ -193,52 +210,153 @@ export default function ExplorerView({ onNavigate }: Props) {
   const { data: scanSessions } = useScanSessions();
 
   // Agency / bureau filter — input values (what's typed) vs applied values (what queries use)
-  const [agencyInput,  setAgencyInput]  = React.useState('');
-  const [bureauInput,  setBureauInput]  = React.useState('');
-  const [agencyFilter, setAgencyFilter] = React.useState('');
-  const [bureauFilter, setBureauFilter] = React.useState('');
+  const [agencyInput,  setAgencyInput]  = React.useState(initial.agencyFilter);
+  const [bureauInput,  setBureauInput]  = React.useState(initial.bureauFilter);
+  const [agencyFilter, setAgencyFilter] = React.useState(initial.agencyFilter);
+  const [bureauFilter, setBureauFilter] = React.useState(initial.bureauFilter);
 
   // get.gov jurisdiction / location filters
-  const [domainTypeFilter, setDomainTypeFilter] = React.useState('');
-  const [stateFilter, setStateFilter] = React.useState('');
+  const [domainTypeFilter, setDomainTypeFilter] = React.useState(initial.domainTypeFilter);
+  const [stateFilter, setStateFilter] = React.useState(initial.stateFilter);
   const { data: domainTypes = [] } = useQuery({ queryKey: ['domain-types'], queryFn: () => api.getDomainTypes() });
 
-  // Column-level filters
-  const [columnFiltersOpen, setColumnFiltersOpen] = React.useState(false);
-  const [cmsFilter, setCmsFilter] = React.useState('');
-  const [cmsMode, setCmsMode] = React.useState<'contains' | 'exact' | 'excludes'>('contains');
-  const [titleFilter, setTitleFilter] = React.useState('');
-  const [titleMode, setTitleMode] = React.useState<'contains' | 'exact' | 'excludes'>('contains');
-  const [debouncedCms, setDebouncedCms] = React.useState('');
-  const [debouncedTitle, setDebouncedTitle] = React.useState('');
+  // Column-level filters: { [field]: { value, mode } }
+  type ColFilterEntry = { value: string; mode: string };
+  const [columnFiltersOpen, setColumnFiltersOpen] = React.useState(Object.keys(initial.columnFilters).length > 0);
+  const [columnFilters, setColumnFilters] = React.useState<Record<string, ColFilterEntry>>(initial.columnFilters);
+  const [debouncedColumnFilters, setDebouncedColumnFilters] = React.useState<Record<string, ColFilterEntry>>(initial.columnFilters);
   React.useEffect(() => {
-    const t = setTimeout(() => setDebouncedCms(cmsFilter), 250);
+    const t = setTimeout(() => setDebouncedColumnFilters(columnFilters), 250);
     return () => clearTimeout(t);
-  }, [cmsFilter]);
-  React.useEffect(() => {
-    const t = setTimeout(() => setDebouncedTitle(titleFilter), 250);
-    return () => clearTimeout(t);
-  }, [titleFilter]);
-  const hasColumnFilters = !!(debouncedCms || debouncedTitle);
-  const clearColumnFilters = () => {
-    setCmsFilter(''); setCmsMode('contains');
-    setTitleFilter(''); setTitleMode('contains');
+  }, [columnFilters]);
+  const hasColumnFilters = Object.values(columnFilters).some((f) => f.value);
+
+  const addColumnFilter = (field: string) => {
+    const meta = getColumnMeta(field);
+    const defaultMode = meta.type === 'int' ? 'exact' : 'contains';
+    setColumnFilters((prev) => ({ ...prev, [field]: { value: '', mode: defaultMode } }));
+    setColumnFiltersOpen(true);
   };
+  const updateColumnFilter = (field: string, value: string, mode: string) => {
+    setColumnFilters((prev) => ({ ...prev, [field]: { value, mode } }));
+    setPage(1);
+  };
+  const removeColumnFilter = (field: string) => {
+    setColumnFilters((prev) => { const next = { ...prev }; delete next[field]; return next; });
+    setPage(1);
+  };
+  const clearColumnFilters = () => { setColumnFilters({}); };
+
+  // Add-filter picker state
+  const [addFilterOpen, setAddFilterOpen] = React.useState(false);
+  const [filterPickerSearch, setFilterPickerSearch] = React.useState('');
+  const addFilterRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!addFilterOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (addFilterRef.current && !addFilterRef.current.contains(e.target as Node)) setAddFilterOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [addFilterOpen]);
+
+  // Extra columns added by the user — URL is source of truth; localStorage is fallback for non-permalink sessions
+  const [extraColumns, setExtraColumns] = React.useState<string[]>(initial.extraColumns);
+  React.useEffect(() => {
+    localStorage.setItem('site_scanner_extra_columns', JSON.stringify(extraColumns));
+  }, [extraColumns]);
+  const addExtraColumn = (field: string) => {
+    setExtraColumns((prev) => (prev.includes(field) ? prev : [...prev, field]));
+  };
+  const removeExtraColumn = (field: string) => {
+    setExtraColumns((prev) => prev.filter((f) => f !== field));
+  };
+
+  // Apply hidden base columns from URL once the table instance is ready
+  const hiddenColsApplied = React.useRef(false);
+  React.useEffect(() => {
+    if (!tableInstance || hiddenColsApplied.current) return;
+    const hiddenKeys = Object.keys(initial.hiddenColumns);
+    if (hiddenKeys.length > 0) {
+      hiddenKeys.forEach((key) => {
+        const col = tableInstance.getColumn(key);
+        if (col) col.toggleVisibility(false);
+      });
+    }
+    hiddenColsApplied.current = true;
+  }, [tableInstance, initial.hiddenColumns]);
+
+  // Sync all permalink-relevant state to the URL hash
+  React.useEffect(() => {
+    syncExplorerState({
+      sort,
+      order,
+      groupByField,
+      groupByOrder,
+      page,
+      extraColumns,
+      columnFilters,
+      domainTypeFilter,
+      stateFilter,
+      agencyFilter,
+      bureauFilter,
+      search,
+      activeFilters,
+      tableInstance,
+      domain: selectedDomain,
+      detailPanelOpen,
+    });
+  }, [
+    sort, order, groupByField, groupByOrder, page, extraColumns,
+    columnFilters, domainTypeFilter, stateFilter, agencyFilter, bureauFilter,
+    search, activeFilters, tableInstance, selectedDomain, detailPanelOpen,
+    syncExplorerState,
+  ]);
+
+  // Dynamic columns = BASE_COLUMNS + user-added extra columns
+  const columns = React.useMemo<ColumnDef<Record<string, unknown>, any>[]>(() => {
+    const extras = extraColumns.map((field): ColumnDef<Record<string, unknown>, any> => {
+      const meta = getColumnMeta(field);
+      return {
+        accessorKey: field,
+        header: meta.label,
+        size: 130,
+        cell: (c) => {
+          const v = c.getValue();
+          if (v == null || v === '') return <span className="text-gray-300">—</span>;
+          const str = String(v);
+          return <span className="text-gray-600 truncate" title={str}>{str}</span>;
+        },
+      };
+    });
+    return [...BASE_COLUMNS, ...extras];
+  }, [extraColumns]);
+
+  // Active column filter params for API calls
+  const activeColFilterParams = React.useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    for (const [field, { value, mode }] of Object.entries(debouncedColumnFilters)) {
+      if (value) {
+        out[`cf_${field}`] = value;
+        out[`cfm_${field}`] = mode;
+      }
+    }
+    return out;
+  }, [debouncedColumnFilters]);
 
   // Overfetch to compensate for client-side hidden rows, capped at 100 total
   const fetchLimit = filters.show_hidden === 'true' ? 25 : Math.min(25 + hidden.size, 100);
 
   const queryParams = {
     page, limit: fetchLimit,
-    sort: groupByFinalDomain ? 'final_domain' : sort,
-    order: groupByFinalDomain ? 'asc' : order,
+    sort: groupByField ?? sort,
+    order: groupByField ? groupByOrder : order,
     ...filters,
     ...(agencyFilter ? { agency: agencyFilter } : {}),
     ...(bureauFilter ? { bureau: bureauFilter } : {}),
     ...(domainTypeFilter ? { branch: domainTypeFilter } : {}),
     ...(stateFilter ? { state: stateFilter } : {}),
-    ...(debouncedCms ? { cms: debouncedCms, cms_mode: cmsMode } : {}),
-    ...(debouncedTitle ? { title_filter: debouncedTitle, title_mode: titleMode } : {}),
+    ...activeColFilterParams,
   };
   const { data, isLoading } = useSites(queryParams);
 
@@ -341,8 +459,7 @@ export default function ExplorerView({ onNavigate }: Props) {
         ...(bureauFilter ? { bureau: bureauFilter } : {}),
         ...(domainTypeFilter ? { branch: domainTypeFilter } : {}),
         ...(stateFilter ? { state: stateFilter } : {}),
-        ...(debouncedCms ? { cms: debouncedCms, cms_mode: cmsMode } : {}),
-        ...(debouncedTitle ? { title_filter: debouncedTitle, title_mode: titleMode } : {}),
+        ...activeColFilterParams,
         page: 1,
         limit: 2500,
         sort,
@@ -412,6 +529,12 @@ export default function ExplorerView({ onNavigate }: Props) {
       setTimeout(() => triggerDownload(json, `sites-export-${mode}-${ts}-part${i + 1}of${chunkCount}.json`), i * 100);
     }
     setExportSizeModal(null);
+    setCustomChunkInput('');
+  };
+
+  const closeExportSizeModal = () => {
+    setExportSizeModal(null);
+    setCustomChunkInput('');
   };
 
   /** Download selected rows as structured JSON for use with Glean or other tools */
@@ -426,12 +549,11 @@ export default function ExplorerView({ onNavigate }: Props) {
         ...(bureauFilter ? { bureau: bureauFilter } : {}),
         ...(domainTypeFilter ? { branch: domainTypeFilter } : {}),
         ...(stateFilter ? { state: stateFilter } : {}),
-        ...(debouncedCms ? { cms: debouncedCms, cms_mode: cmsMode } : {}),
-        ...(debouncedTitle ? { title_filter: debouncedTitle, title_mode: titleMode } : {}),
+        ...activeColFilterParams,
         page: 1,
         limit: 5000,
-        sort: groupByFinalDomain ? 'final_domain' : sort,
-        order: groupByFinalDomain ? 'asc' : order,
+        sort: groupByField ?? sort,
+        order: groupByField ? groupByOrder : order,
       }) as any;
       const allMatchingRows: any[] = result?.data || [];
       const rows = allMatchingRows.filter((r: any) => selectedDomains.has(String(r.domain)));
@@ -639,21 +761,45 @@ export default function ExplorerView({ onNavigate }: Props) {
 
         {/* Filter chips + toolbar actions */}
         <div className="flex items-center justify-between pr-2">
-          <FilterChips onFilter={handleFilter} />
+          <FilterChips onFilter={handleFilter} search={search} onSearchChange={(v) => { setSearch(v); setPage(1); }} />
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setGroupByFinalDomain((v) => !v)}
-              aria-pressed={groupByFinalDomain}
-              title="Group sites by their final redirect target"
-              className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${
-                groupByFinalDomain
-                  ? 'bg-gov-blue text-white border-gov-blue'
-                  : 'bg-white text-gov-blue border-blue-300 hover:bg-blue-50'
-              }`}
+            <GroupByPicker
+              groupByField={groupByField}
+              groupByOrder={groupByOrder}
+              onGroupByChange={(field) => { setGroupByField(field); setPage(1); }}
+              onOrderChange={(ord) => { setGroupByOrder(ord); setPage(1); }}
+            />
+            <ColumnToggle
+              table={tableInstance}
+              extraColumns={extraColumns}
+              onAddColumn={addExtraColumn}
+              onRemoveColumn={removeExtraColumn}
+            />
+            <a
+              href={(() => {
+                const p = new URLSearchParams();
+                // Chip filters + search (from FilterChips via `filters` state)
+                for (const [k, v] of Object.entries(filters)) {
+                  if (v && k !== 'show_hidden') p.set(k, String(v));
+                }
+                if (agencyFilter) p.set('agency', agencyFilter);
+                if (bureauFilter) p.set('bureau', bureauFilter);
+                if (domainTypeFilter) p.set('branch', domainTypeFilter);
+                if (stateFilter) p.set('state', stateFilter);
+                // Generic column filters
+                for (const [field, { value, mode }] of Object.entries(columnFilters)) {
+                  if (value) { p.set(`cf_${field}`, value); p.set(`cfm_${field}`, mode); }
+                }
+                const qs = p.toString();
+                return `/agent/sites${qs ? `?${qs}` : ''}`;
+              })()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs px-2 py-0.5 rounded border bg-white text-gray-500 border-gray-200 hover:border-gray-400 hover:text-gray-700 transition-colors shrink-0"
+              title="Open current view as a static, shareable HTML page"
             >
-              Group by redirect target
-            </button>
-            <ColumnToggle table={tableInstance} />
+              Static page
+            </a>
           </div>
         </div>
 
@@ -717,57 +863,97 @@ export default function ExplorerView({ onNavigate }: Props) {
           <div className="flex items-center gap-x-3 gap-y-1.5 flex-wrap px-4 py-2 border-b border-gray-200 bg-blue-50">
             <span className="text-xs text-gray-500 font-medium shrink-0">Filter columns:</span>
 
-            {/* CMS filter */}
-            <div className="flex items-center gap-1 shrink-0">
-              <label className="text-xs text-gray-500 shrink-0">CMS</label>
-              <select
-                value={cmsMode}
-                onChange={(e) => { setCmsMode(e.target.value as typeof cmsMode); setPage(1); }}
-                className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-700"
-                aria-label="CMS match mode"
-              >
-                <option value="contains">contains</option>
-                <option value="exact">is exactly</option>
-                <option value="excludes">excludes</option>
-              </select>
-              <input
-                type="text"
-                value={cmsFilter}
-                onChange={(e) => { setCmsFilter(e.target.value); setPage(1); }}
-                placeholder="e.g. WordPress"
-                className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-32"
-                aria-label="CMS filter value"
-              />
-              {cmsFilter && (
-                <button onClick={() => setCmsFilter('')} className="text-gray-400 hover:text-gray-600 text-xs" aria-label="Clear CMS filter">✕</button>
-              )}
-            </div>
+            {/* One row per active column filter */}
+            {Object.entries(columnFilters).map(([field, { value, mode }]) => {
+              const meta = getColumnMeta(field);
+              const isInt = meta.type === 'int';
+              return (
+                <div key={field} className="flex items-center gap-1 shrink-0">
+                  <label className="text-xs text-gray-500 shrink-0">{meta.label}</label>
+                  <select
+                    value={mode}
+                    onChange={(e) => updateColumnFilter(field, value, e.target.value)}
+                    className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-700"
+                    aria-label={`${meta.label} match mode`}
+                  >
+                    {isInt ? (
+                      <>
+                        <option value="exact">equals</option>
+                        <option value="gt">greater than</option>
+                        <option value="lt">less than</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="contains">contains</option>
+                        <option value="exact">is exactly</option>
+                        <option value="excludes">excludes</option>
+                      </>
+                    )}
+                  </select>
+                  <input
+                    type={isInt ? 'number' : 'text'}
+                    value={value}
+                    onChange={(e) => updateColumnFilter(field, e.target.value, mode)}
+                    placeholder="value"
+                    className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-32"
+                    aria-label={`${meta.label} filter value`}
+                    autoFocus={!value}
+                  />
+                  <button
+                    onClick={() => removeColumnFilter(field)}
+                    className="text-gray-400 hover:text-gray-600 text-xs"
+                    aria-label={`Remove ${meta.label} filter`}
+                  >✕</button>
+                </div>
+              );
+            })}
 
-            <div className="h-4 w-px bg-gray-300 shrink-0" aria-hidden="true" />
-
-            {/* Page Title filter */}
-            <div className="flex items-center gap-1 shrink-0">
-              <label className="text-xs text-gray-500 shrink-0">Page Title</label>
-              <select
-                value={titleMode}
-                onChange={(e) => { setTitleMode(e.target.value as typeof titleMode); setPage(1); }}
-                className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-700"
-                aria-label="Page title match mode"
+            {/* Add filter picker */}
+            <div className="relative shrink-0" ref={addFilterRef}>
+              <button
+                onClick={() => { setAddFilterOpen((v) => !v); setFilterPickerSearch(''); }}
+                className="text-xs text-gov-blue hover:text-blue-800 border border-blue-200 rounded px-2 py-0.5 bg-white"
               >
-                <option value="contains">contains</option>
-                <option value="exact">is exactly</option>
-                <option value="excludes">excludes</option>
-              </select>
-              <input
-                type="text"
-                value={titleFilter}
-                onChange={(e) => { setTitleFilter(e.target.value); setPage(1); }}
-                placeholder="e.g. Home"
-                className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-48"
-                aria-label="Page title filter value"
-              />
-              {titleFilter && (
-                <button onClick={() => setTitleFilter('')} className="text-gray-400 hover:text-gray-600 text-xs" aria-label="Clear page title filter">✕</button>
+                + Add filter
+              </button>
+              {addFilterOpen && (
+                <div className="absolute left-0 top-full mt-1 z-40 bg-white border border-gray-200 rounded shadow-lg w-64 text-xs">
+                  <input
+                    type="text"
+                    value={filterPickerSearch}
+                    onChange={(e) => setFilterPickerSearch(e.target.value)}
+                    onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') setAddFilterOpen(false); }}
+                    placeholder="Search columns…"
+                    autoFocus
+                    className="w-full px-3 py-2 border-b border-gray-100 focus:outline-none text-xs"
+                  />
+                  <div className="max-h-52 overflow-y-auto">
+                    {COLUMN_CATALOG
+                      .filter((c) =>
+                        FILTERABLE_TYPES.includes(c.type) &&
+                        !columnFilters[c.field] &&
+                        (!filterPickerSearch ||
+                          c.label.toLowerCase().includes(filterPickerSearch.toLowerCase()) ||
+                          c.field.includes(filterPickerSearch.toLowerCase()) ||
+                          c.group.toLowerCase().includes(filterPickerSearch.toLowerCase()))
+                      )
+                      .map((c) => (
+                        <button
+                          key={c.field}
+                          className="w-full text-left px-3 py-1.5 hover:bg-blue-50 flex items-center justify-between gap-2"
+                          onClick={() => {
+                            addColumnFilter(c.field);
+                            setAddFilterOpen(false);
+                            setFilterPickerSearch('');
+                          }}
+                        >
+                          <span className="text-gray-800">{c.label}</span>
+                          <span className="text-gray-400 shrink-0">{c.group}</span>
+                        </button>
+                      ))
+                    }
+                  </div>
+                </div>
               )}
             </div>
 
@@ -775,7 +961,7 @@ export default function ExplorerView({ onNavigate }: Props) {
               <>
                 <div className="h-4 w-px bg-gray-300 shrink-0" aria-hidden="true" />
                 <button onClick={() => { clearColumnFilters(); setPage(1); }} className="text-xs text-gray-500 hover:text-gray-700 underline shrink-0">
-                  Clear column filters
+                  Clear all
                 </button>
               </>
             )}
@@ -916,41 +1102,76 @@ export default function ExplorerView({ onNavigate }: Props) {
                   </button>
                 </div>
               )}
-              {exportSizeModal && (
-                <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded shadow-lg text-xs w-72">
-                  <div className="px-3 py-2 border-b border-gray-100 text-gray-700 font-medium">Export ready</div>
-                  <div className="px-3 py-2 space-y-1.5">
-                    <div className="text-gray-600">
-                      File size: <span className="font-medium text-gray-900">{formatBytes(exportSizeModal.sizeBytes)}</span>
+              {exportSizeModal && (() => {
+                const parsedCustom = parseInt(customChunkInput, 10);
+                const customChunkCount = !isNaN(parsedCustom) && parsedCustom >= 2 && parsedCustom <= 500 ? parsedCustom : null;
+                return (
+                  <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded shadow-lg text-xs w-80">
+                    <div className="px-3 py-2 border-b border-gray-100 text-gray-700 font-medium">Export ready</div>
+                    <div className="px-3 py-2 space-y-1.5">
+                      <div className="text-gray-600">
+                        File size: <span className="font-medium text-gray-900">{formatBytes(exportSizeModal.sizeBytes)}</span>
+                        {' · '}{exportSizeModal.payload.domains.length.toLocaleString()} records
+                      </div>
+                      <div className="text-amber-700 bg-amber-50 rounded px-2 py-1.5 leading-snug">
+                        This is larger than 300 KB. Split it into{' '}
+                        <span className="font-medium">{exportSizeModal.chunkCount} ~300 KB files</span>{' '}
+                        or choose a custom number below.
+                      </div>
                     </div>
-                    <div className="text-amber-700 bg-amber-50 rounded px-2 py-1.5 leading-snug">
-                      This is larger than 300 KB. You can download it as one file or split it into{' '}
-                      <span className="font-medium">{exportSizeModal.chunkCount} smaller files</span>{' '}
-                      (~{formatBytes(Math.ceil(exportSizeModal.sizeBytes / exportSizeModal.chunkCount))} each).
+                    <div className="px-3 py-2 border-t border-gray-100 flex flex-col gap-1.5">
+                      <button
+                        className="w-full text-left px-2 py-1.5 rounded hover:bg-blue-50 text-blue-700 font-medium"
+                        onClick={() => { triggerDownload(exportSizeModal.json, exportSizeModal.filename); closeExportSizeModal(); }}
+                      >
+                        Download as one file
+                      </button>
+                      <button
+                        className="w-full text-left px-2 py-1.5 rounded hover:bg-blue-50 text-blue-700 font-medium"
+                        onClick={() => downloadChunked(exportSizeModal)}
+                      >
+                        Split into {exportSizeModal.chunkCount} files
+                        <span className="font-normal text-blue-500 ml-1">
+                          (~{formatBytes(Math.ceil(exportSizeModal.sizeBytes / exportSizeModal.chunkCount))} each)
+                        </span>
+                      </button>
+                      <div className="border-t border-gray-100 pt-2">
+                        <label className="block text-gray-500 mb-1">Split into a specific number of files:</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="2"
+                            max="500"
+                            value={customChunkInput}
+                            onChange={(e) => setCustomChunkInput(e.target.value)}
+                            placeholder="e.g. 5"
+                            className="w-20 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          />
+                          {customChunkCount && (
+                            <span className="text-gray-400">
+                              ~{formatBytes(Math.ceil(exportSizeModal.sizeBytes / customChunkCount))} per file
+                            </span>
+                          )}
+                        </div>
+                        {customChunkCount && (
+                          <button
+                            className="mt-1.5 w-full text-left px-2 py-1.5 rounded hover:bg-blue-50 text-blue-700 font-medium"
+                            onClick={() => downloadChunked({ ...exportSizeModal, chunkCount: customChunkCount })}
+                          >
+                            Split into {customChunkCount} files
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        className="w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-gray-500"
+                        onClick={closeExportSizeModal}
+                      >
+                        Cancel
+                      </button>
                     </div>
                   </div>
-                  <div className="px-3 py-2 border-t border-gray-100 flex flex-col gap-1.5">
-                    <button
-                      className="w-full text-left px-2 py-1.5 rounded hover:bg-blue-50 text-blue-700 font-medium"
-                      onClick={() => { triggerDownload(exportSizeModal.json, exportSizeModal.filename); setExportSizeModal(null); }}
-                    >
-                      Download as one file
-                    </button>
-                    <button
-                      className="w-full text-left px-2 py-1.5 rounded hover:bg-blue-50 text-blue-700 font-medium"
-                      onClick={() => downloadChunked(exportSizeModal)}
-                    >
-                      Split into {exportSizeModal.chunkCount} files
-                    </button>
-                    <button
-                      className="w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-gray-500"
-                      onClick={() => setExportSizeModal(null)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
             <button
               onClick={generateDashboardReport}
@@ -1027,7 +1248,7 @@ export default function ExplorerView({ onNavigate }: Props) {
 
         <DataTable
           data={visibleRows}
-          columns={COLUMNS}
+          columns={columns}
           onRowClick={(row) => openDetail(String(row.domain))}
           selectedKey={selectedDomain}
           isLoading={isLoading}
@@ -1038,10 +1259,10 @@ export default function ExplorerView({ onNavigate }: Props) {
           onToggleRow={toggleRow}
           onToggleAll={toggleAll}
           onRangeToggle={rangeToggle}
-          sortColumn={groupByFinalDomain ? 'final_domain' : sort}
-          sortOrder={groupByFinalDomain ? 'asc' : (order as 'asc' | 'desc')}
-          onSortChange={groupByFinalDomain ? undefined : handleSortChange}
-          groupBy={groupByFinalDomain ? (row: any) => String(row.final_domain ?? row.domain) : undefined}
+          sortColumn={groupByField ?? sort}
+          sortOrder={groupByField ? groupByOrder : (order as 'asc' | 'desc')}
+          onSortChange={groupByField ? undefined : handleSortChange}
+          groupBy={groupByField ? (row: any) => String((row as any)[groupByField] ?? '(none)') : undefined}
         />
 
         {data && (

@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { query, execute } from '../db';
 import { PUBLIC_ONLY_CONDITION } from '../utils/publicFilter';
+import { simplify } from '../utils/simplify';
+import { buildColumnFilters } from '../utils/columnFilters';
 
 const router = Router();
 
@@ -103,6 +105,11 @@ router.get('/', async (req: Request, res: Response) => {
     params.city = `%${req.query.city}%`;
   }
 
+  // Generic column filters: cf_<field>=value, cfm_<field>=mode (contains|exact|excludes|gt|lt)
+  const { conditions: cfConditions, params: cfParams } = buildColumnFilters(req);
+  conditions.push(...cfConditions);
+  Object.assign(params, cfParams);
+
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   try {
@@ -114,6 +121,22 @@ router.get('/', async (req: Request, res: Response) => {
       `SELECT *, ${FINAL_DOMAIN_SQL} AS final_domain FROM sites ${where} ORDER BY ${safeSort} ${order} LIMIT :limit OFFSET :offset`,
       { ...params, limit, offset }
     );
+
+    if (req.query.simplified === 'true') {
+      const { rows: simplified, global_null, global_redundant } = simplify(rows as Record<string, unknown>[]);
+      res.json({
+        data: simplified,
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+        simplified: {
+          global_null: global_null.join(','),
+          global_redundant,
+        },
+      });
+      return;
+    }
 
     res.json({
       data: rows,

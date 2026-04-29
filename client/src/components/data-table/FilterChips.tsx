@@ -33,11 +33,12 @@ const COLOR_MAP: Record<string, { active: string; inactive: string; negative: st
 
 interface FilterChipsProps {
   onFilter: (filters: Record<string, string>) => void;
+  search: string;
+  onSearchChange: (v: string) => void;
 }
 
-export default function FilterChips({ onFilter }: FilterChipsProps) {
+export default function FilterChips({ onFilter, search, onSearchChange }: FilterChipsProps) {
   const { activeFilters, setFilter, clearFilters } = useUIStore();
-  const [search, setSearch] = React.useState('');
   const searchRef = React.useRef<HTMLInputElement>(null);
 
   // Focus the search input when Cmd+K fires from App.tsx
@@ -90,7 +91,7 @@ export default function FilterChips({ onFilter }: FilterChipsProps) {
         type="search"
         placeholder="Search domain, agency, bureau… (⌘K)"
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(e) => onSearchChange(e.target.value)}
         className="border border-gray-300 rounded px-2.5 py-1 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-gov-blue"
       />
 
@@ -127,7 +128,7 @@ export default function FilterChips({ onFilter }: FilterChipsProps) {
 
       {hasFilters && (
         <button
-          onClick={() => { clearFilters(); setSearch(''); }}
+          onClick={() => { clearFilters(); onSearchChange(''); }}
           className="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 underline"
         >
           Clear filters

@@ -5,6 +5,7 @@ import { DataTable } from '../components/data-table/DataTable';
 import { useSqlQuery, getQueryHistory, addToHistory } from '../hooks/useSqlQuery';
 import { useUIStore } from '../store/uiStore';
 import { SAMPLE_QUERIES } from '../lib/sampleQueries';
+import { useUrlSync, decodeB64, encodeB64 } from '../hooks/useUrlSync';
 import type { QueryResult } from 'shared';
 import type { View } from '../App';
 
@@ -13,12 +14,25 @@ interface Props {
 }
 
 export default function SqlView({ onNavigate }: Props) {
-  const [sql, setSql] = React.useState(SAMPLE_QUERIES[0].sql);
+  const { initialState, syncToUrl } = useUrlSync();
+  const initialSql = React.useMemo(() => {
+    if (initialState.sql) {
+      const decoded = decodeB64(initialState.sql);
+      if (decoded) return decoded;
+    }
+    return SAMPLE_QUERIES[0].sql;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [sql, setSql] = React.useState(initialSql);
   const [queryResult, setQueryResult] = React.useState<QueryResult | null>(null);
   const [history, setHistory] = React.useState<string[]>(getQueryHistory);
   const [showSamples, setShowSamples] = React.useState(false);
   const { openDetail, setReport } = useUIStore();
   const mutation = useSqlQuery();
+
+  // Keep SQL in the URL so sharing the link restores the query
+  React.useEffect(() => {
+    syncToUrl({ view: 'sql', sql: sql ? encodeB64(sql) : undefined });
+  }, [sql, syncToUrl]);
 
   const handleRun = async () => {
     try {

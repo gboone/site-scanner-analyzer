@@ -12,6 +12,8 @@
 import { z } from 'zod';
 import { query, pool } from '../db';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { PUBLIC_ONLY_CONDITION } from '../utils/publicFilter';
+import { normalizeSite } from '../utils/normalizeSite';
 
 // Columns projected in search_sites — trimmed to avoid huge payloads.
 const SITE_SUMMARY_COLS = [
@@ -36,36 +38,6 @@ const FINAL_DOMAIN_SQL =
   `CASE WHEN redirect = 1 AND url IS NOT NULL AND url != '' ` +
   `THEN SUBSTRING_INDEX(SUBSTRING_INDEX(url, '/', 3), '//', -1) ELSE domain END`;
 
-/**
- * "Public" filter condition — mirrors the public_only chip in ExplorerView.
- *
- * A site is considered genuinely public when it:
- *   • is not a redirect (or redirect field is NULL)
- *   • is live with HTTP 200 (or NULL status, e.g. GSA-imported records)
- *   • has a page title that doesn't indicate a login screen, default server
- *     page, webmail portal, or other gated/non-public landing page
- */
-const PUBLIC_ONLY_CONDITION =
-  `(redirect = 0 OR redirect IS NULL) AND live = 1 ` +
-  `AND (status_code = 200 OR status_code IS NULL) ` +
-  `AND (title IS NULL OR title = '' OR (` +
-    `title NOT LIKE '%login%' AND ` +
-    `title NOT LIKE '%log in%' AND ` +
-    `title NOT LIKE '%sign in%' AND ` +
-    `title NOT LIKE '%sign-in%' AND ` +
-    `title NOT LIKE '%request rejected%' AND ` +
-    `title NOT LIKE '%access denied%' AND ` +
-    `title NOT LIKE '%unauthorized%' AND ` +
-    `title NOT LIKE '%default website%' AND ` +
-    `title NOT LIKE '%welcome to iis%' AND ` +
-    `title NOT LIKE '%welcome to default%' AND ` +
-    `title NOT LIKE '%outlook%' AND ` +
-    `title NOT LIKE '%webmail%' AND ` +
-    `title NOT LIKE '%forbidden%' AND ` +
-    `title NOT LIKE '%it security%' AND ` +
-    `title NOT LIKE '%page not found%'` +
-  `))`;
-
 // ---------------------------------------------------------------------------
 // Zod schemas — defined as plain objects (ZodRawShape) and passed as `any`
 // to work around TS2589 in McpServer.tool() generic resolution.
@@ -80,6 +52,7 @@ const searchSitesSchema = {
   has_dap:        z.boolean().optional().describe('true = sites with DAP analytics detected'),
   https_enforced: z.boolean().optional().describe('true = sites that enforce HTTPS'),
   no_sitemap:     z.boolean().optional().describe('true = sites missing sitemap.xml'),
+  public_only:    z.boolean().optional().describe('true = exclude redirects, non-.gov domains, staging/dev subdomains, VPN/auth portals — mirrors the Public filter in the Explorer view'),
   page:           z.number().int().min(1).default(1).describe('Page number (1-based)'),
   limit:          z.number().int().min(1).max(100).default(25).describe('Results per page (max 100)'),
   sort:           z.string().optional().describe('Column: domain, agency, bureau, live, status_code, uswds_count, dap, sitemap_xml_detected, https_enforced, scan_date, cms, title'),
@@ -205,13 +178,14 @@ export function registerTools(server: McpServer): void {
         const conditions: string[] = [];
         const params: Record<string, unknown> = {};
 
-        if (args.search)  { conditions.push('(domain LIKE :search OR agency LIKE :search OR bureau LIKE :search OR title LIKE :search)'); params.search = `%${args.search}%`; }
+        if (args.search)       { conditions.push('(domain LIKE :search OR agency LIKE :search OR bureau LIKE :search OR title LIKE :search)'); params.search = `%${args.search}%`; }
         if (args.live === true)  conditions.push('live = 1');
         if (args.live === false) conditions.push('live = 0');
         if (args.has_uswds)      conditions.push('uswds_count > 0');
         if (args.no_sitemap)     conditions.push('sitemap_xml_detected = 0');
         if (args.has_dap)        conditions.push('dap = 1');
         if (args.https_enforced) conditions.push('https_enforced = 1');
+        if (args.public_only)    conditions.push(PUBLIC_ONLY_CONDITION);
         if (args.agency) { conditions.push('agency = :agency'); params.agency = args.agency; }
         if (args.bureau) { conditions.push('bureau = :bureau'); params.bureau = args.bureau; }
 
@@ -239,13 +213,13 @@ export function registerTools(server: McpServer): void {
       try {
         const domain: string = args.domain;
         const [siteRows, history] = await Promise.all([
-          query('SELECT * FROM sites WHERE domain = ?', [domain]),
+          query<Record<string, unknown>>(`SELECT *, ${FINAL_DOMAIN_SQL} AS final_domain FROM sites WHERE domain = ?`, [domain]),
           query('SELECT scanned_at, live, status_code, redirect_chain, duration_ms FROM scan_history WHERE domain = ? ORDER BY scanned_at DESC LIMIT 5', [domain]),
         ]);
         if (!siteRows.length) {
           return { content: [{ type: 'text' as const, text: `No site found for domain: ${domain}` }], isError: true };
         }
-        return mcpResult({ site: siteRows[0], recent_scans: history });
+        return mcpResult({ site: normalizeSite(siteRows[0], null), recent_scans: history });
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `Error: ${err.message}` }], isError: true };
       }
@@ -255,10 +229,10 @@ export function registerTools(server: McpServer): void {
   // ── get_public_sites ───────────────────────────────────────────────────────
   server.tool(
     'get_public_sites',
-    'Return all database fields for genuinely public-facing federal websites owned by a given agency. ' +
-    '"Public" means: not a redirect, live with HTTP 200 (or NULL status for imported records), and no ' +
-    'title pattern indicating a login screen, default server page, webmail portal, or access-denied page. ' +
-    'This mirrors the "Public" filter chip in the Explorer view. Results are paginated (default 50, max 200).',
+    'Return normalized records for genuinely public-facing federal websites owned by a given agency. ' +
+    '"Public" mirrors the shared PUBLIC_ONLY_CONDITION used across all REST endpoints: live with HTTP 200, ' +
+    'not a redirect, base domain must be .gov, no staging/dev/qa subdomains, and no VPN/FTP/email portals. ' +
+    'Results are paginated (default 50, max 200).',
     getPublicSitesSchema as any,
     async (args: any) => {
       try {
@@ -281,34 +255,30 @@ export function registerTools(server: McpServer): void {
         params.agency = args.agency;
 
         if (args.bureau) {
-          conditions.push('bureau = :bureau');
+          // Scope to bureau within this agency to avoid cross-agency name collisions.
+          conditions.push('bureau = :bureau AND agency = :agency');
           params.bureau = args.bureau;
         }
 
         const where = `WHERE ${conditions.join(' AND ')}`;
 
-        const [countRows, rows] = await Promise.all([
+        const [countRows, rawRows] = await Promise.all([
           query<{ count: string }>(`SELECT COUNT(*) as count FROM sites ${where}`, params),
-          query(
+          query<Record<string, unknown>>(
             `SELECT *, ${FINAL_DOMAIN_SQL} AS final_domain FROM sites ${where} ORDER BY ${sort} ${order} LIMIT :limit OFFSET :offset`,
             { ...params, limit, offset }
           ),
         ]);
 
         const total = Number(countRows[0].count);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              filter:  { agency: args.agency, bureau: args.bureau ?? null },
-              data:    rows,
-              total,
-              page,
-              limit,
-              pages:   Math.ceil(total / limit),
-            }, null, 2),
-          }],
-        };
+        return mcpResult({
+          filter:  { agency: args.agency, bureau: args.bureau ?? null },
+          data:    rawRows.map(row => normalizeSite(row, null)),
+          total,
+          page,
+          limit,
+          pages:   Math.ceil(total / limit),
+        });
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `Error: ${err.message}` }], isError: true };
       }

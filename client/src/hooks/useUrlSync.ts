@@ -26,6 +26,17 @@ export interface UrlState {
   filters?: string;       // JSON-encoded chip filters
   report?: string;        // base64-encoded ReportConfig
   sql?: string;           // base64-encoded SQL query
+  // ExplorerView state
+  sort?: string;
+  order?: string;
+  groupBy?: string;
+  groupByOrder?: string;
+  page?: number;
+  cols?: string;          // comma-separated extra column names
+  hiddenCols?: string;    // comma-separated hidden base column names
+  cf?: string;            // base64-encoded JSON column filters
+  domainType?: string;
+  st?: string;            // state filter (avoids clashing with 'state' keyword)
 }
 
 function parseHash(): UrlState {
@@ -50,6 +61,27 @@ function parseHash(): UrlState {
     if (report) state.report = report;
     const sql = params.get('sql');
     if (sql) state.sql = sql;
+    // ExplorerView params
+    const sort = params.get('sort');
+    if (sort) state.sort = sort;
+    const order = params.get('order');
+    if (order) state.order = order;
+    const groupBy = params.get('groupBy');
+    if (groupBy) state.groupBy = groupBy;
+    const groupByOrder = params.get('groupByOrder');
+    if (groupByOrder) state.groupByOrder = groupByOrder;
+    const page = params.get('page');
+    if (page) state.page = parseInt(page, 10) || 1;
+    const cols = params.get('cols');
+    if (cols) state.cols = cols;
+    const hiddenCols = params.get('hiddenCols');
+    if (hiddenCols) state.hiddenCols = hiddenCols;
+    const cf = params.get('cf');
+    if (cf) state.cf = cf;
+    const domainType = params.get('domainType');
+    if (domainType) state.domainType = domainType;
+    const st = params.get('st');
+    if (st) state.st = st;
     return state;
   } catch {
     return {};
@@ -66,6 +98,17 @@ function buildHash(state: UrlState): string {
   if (state.filters) params.set('filters', state.filters);
   if (state.report) params.set('report', state.report);
   if (state.sql) params.set('sql', state.sql);
+  // ExplorerView — omit defaults to keep URLs tidy
+  if (state.sort && state.sort !== 'domain') params.set('sort', state.sort);
+  if (state.order && state.order !== 'asc') params.set('order', state.order);
+  if (state.groupBy) params.set('groupBy', state.groupBy);
+  if (state.groupByOrder && state.groupByOrder !== 'asc') params.set('groupByOrder', state.groupByOrder);
+  if (state.page && state.page > 1) params.set('page', String(state.page));
+  if (state.cols) params.set('cols', state.cols);
+  if (state.hiddenCols) params.set('hiddenCols', state.hiddenCols);
+  if (state.cf) params.set('cf', state.cf);
+  if (state.domainType) params.set('domainType', state.domainType);
+  if (state.st) params.set('st', state.st);
   return params.toString();
 }
 

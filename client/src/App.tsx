@@ -32,8 +32,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep the hash in sync as view/domain/report changes
+  // Keep the hash in sync as view/domain/report changes.
+  // When on the explorer view, ExplorerView owns the full URL — skip to avoid clobbering it.
   useEffect(() => {
+    if (currentView === 'explorer') return;
     syncToUrl({
       view: currentView,
       domain: detailPanelOpen && selectedDomain ? selectedDomain : undefined,

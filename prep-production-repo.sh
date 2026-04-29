@@ -19,6 +19,8 @@ rsync -av \
   --exclude='drizzle/' \
   --exclude='.claude/' \
   --exclude='PLAN.md' \
+  --exclude='CLAUDE.md' \
+  --exclude='prep-production-repo.sh' \
   "$SOURCE_DIR/" \
   "$DEPLOY_DIR/"
 
