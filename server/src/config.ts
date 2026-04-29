@@ -22,4 +22,5 @@ export const config = {
   gleanApiKey: process.env.GLEAN_API_KEY || '',
   gleanEndpoint: process.env.GLEAN_ENDPOINT || '',
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
+  mcpAuthToken: process.env.MCP_SECRET || '',
 };

@@ -405,6 +405,16 @@ export default function SettingsView() {
           onSave={(v) => handleSave('ANTHROPIC_API_KEY', v)}
           type="password"
         />
+        <div className="py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-y border-gray-100">
+          MCP Access
+        </div>
+        <SettingField
+          label="MCP Auth Token"
+          description="Bearer token required to access the MCP endpoint. Set this and pass it as Authorization: Bearer <token> in Claude Desktop or Glean."
+          value={s.MCP_SECRET || ''}
+          onSave={(v) => handleSave('MCP_SECRET', v)}
+          type="password"
+        />
       </div>
 
       {/* Scheduled Jobs */}

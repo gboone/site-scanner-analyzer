@@ -207,6 +207,7 @@ async function main() {
     GLEAN_API_KEY:     'gleanApiKey',
     GLEAN_ENDPOINT:    'gleanEndpoint',
     ANTHROPIC_API_KEY: 'anthropicApiKey',
+    MCP_SECRET:        'mcpAuthToken',
   };
   const savedSettings = await query<{ key: string; value: string }>(
     'SELECT `key`, value FROM settings'
