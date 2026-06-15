@@ -78,11 +78,6 @@ export const api = {
     if (result?.type === 'error') throw new Error(result.error);
     return result;
   },
-  summarizeDashboard: (provider: 'claude' | 'glean', filter?: { agency?: string; bureau?: string }) =>
-    request('/stats/summarize', {
-      method: 'POST',
-      body: JSON.stringify({ provider, agency: filter?.agency || '', bureau: filter?.bureau || '' }),
-    }),
   getAgencySuggestions: (q: string) =>
     request<{ value: string; count: number }[]>(`/agencies?q=${encodeURIComponent(q)}`),
   getBureauSuggestions: (q: string, agency?: string) => {
@@ -90,11 +85,24 @@ export const api = {
     if (agency) params.set('agency', agency);
     return request<{ value: string; count: number }[]>(`/bureaus?${params}`);
   },
-  testGlean: () => request('/settings/test-glean'),
   testGSA: () => request('/gsa/test'),
   getSettings: () => request<Record<string, string>>('/settings'),
   setSetting: (key: string, value: string) =>
     request(`/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
+
+  // Claude chat over the site data
+  listModels: () => request<{ id: string; display_name: string }[]>('/models'),
+  chat: (messages: { role: 'user' | 'assistant'; content: string }[]) =>
+    request<{ reply: string; tools_used: string[] }>('/chat', {
+      method: 'POST',
+      body: JSON.stringify({ messages }),
+    }),
+  resolveAgency: (q: string) =>
+    request<{
+      query: string;
+      match: { agency: string; source: string; site_count: number } | null;
+      candidates: { agency: string; source: string; site_count: number }[] | null;
+    }>(`/agencies/resolve?q=${encodeURIComponent(q)}`),
   health: () => request('/health'),
 
   // Scan sessions — persists bulk-scan progress across page loads

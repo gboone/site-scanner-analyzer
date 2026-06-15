@@ -48,16 +48,8 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   );
 }
 
-type AiProvider = 'claude' | 'glean';
-
 export default function DashboardView({ onNavigate }: Props) {
   const { reportConfig, clearReport } = useUIStore();
-
-  // AI summary (preserved from old dashboard)
-  const [aiProvider, setAiProvider] = React.useState<AiProvider>('claude');
-  const [aiSummary, setAiSummary] = React.useState<string | null>(null);
-  const [aiLoading, setAiLoading] = React.useState(false);
-  const [aiError, setAiError] = React.useState<string | null>(null);
 
   // Build filter for the stats hook based on reportConfig scope
   const statsFilter = React.useMemo(() => {
@@ -81,24 +73,6 @@ export default function DashboardView({ onNavigate }: Props) {
     error: Error | null;
   };
 
-  const generateSummary = async () => {
-    if (!stats || !reportConfig) return;
-    setAiLoading(true);
-    setAiError(null);
-    setAiSummary(null);
-    try {
-      const filter = reportConfig.scope === 'agency'
-        ? { agency: reportConfig.agency, bureau: reportConfig.bureaus?.[0] }
-        : undefined;
-      const res = await api.summarizeDashboard(aiProvider, filter) as any;
-      setAiSummary(res?.summary || JSON.stringify(res, null, 2));
-    } catch (err: any) {
-      setAiError(err.message);
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
   const handleExportJSON = () => {
     if (!stats) return;
     const payload = { reportConfig, stats };
@@ -113,7 +87,6 @@ export default function DashboardView({ onNavigate }: Props) {
 
   const handleClearReport = () => {
     clearReport();
-    setAiSummary(null);
   };
 
   // ── No report config → scope picker ────────────────────────────────────
@@ -297,41 +270,6 @@ export default function DashboardView({ onNavigate }: Props) {
             )}
           </div>
         )}
-
-        {/* ── AI Summary ──────────────────────────────────────────────── */}
-        <section aria-label="AI summary" className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-sm font-semibold text-gray-700">AI Narrative Summary</h2>
-            <label htmlFor="ai-provider-select" className="sr-only">AI provider</label>
-            <select
-              id="ai-provider-select"
-              value={aiProvider}
-              onChange={(e) => setAiProvider(e.target.value as AiProvider)}
-              className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-gov-blue"
-            >
-              <option value="claude">Claude</option>
-              <option value="glean">Glean</option>
-            </select>
-            <button
-              onClick={generateSummary}
-              disabled={aiLoading}
-              className="btn-primary text-xs disabled:opacity-50"
-            >
-              {aiLoading ? 'Generating…' : 'Generate'}
-            </button>
-            {aiSummary && (
-              <button onClick={() => setAiSummary(null)} className="text-xs text-gray-400 hover:text-gray-600">
-                Dismiss
-              </button>
-            )}
-          </div>
-          {aiError && <p className="text-xs text-red-600">{aiError}</p>}
-          {aiSummary ? (
-            <div className="mt-2 text-sm text-gray-700 border-t border-gray-100 pt-3 whitespace-pre-wrap">{aiSummary}</div>
-          ) : (
-            !aiLoading && <p className="text-xs text-gray-400">Generate an AI narrative of this report scope.</p>
-          )}
-        </section>
 
         {/* ── HTTPS + USWDS donuts ────────────────────────────────────── */}
         <section aria-label="Adoption charts">

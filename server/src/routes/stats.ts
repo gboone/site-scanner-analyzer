@@ -1,22 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
-import { config } from '../config';
 
 const router = Router();
-
-// Simple in-memory rate limiter: max 10 AI summarizations per IP per 5 minutes
-const summarizeRateLimitMap = new Map<string, number[]>();
-const SUMMARIZE_RATE_LIMIT = 10;
-const SUMMARIZE_RATE_WINDOW_MS = 5 * 60 * 1000;
-
-function checkSummarizeRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const timestamps = (summarizeRateLimitMap.get(ip) ?? []).filter(t => now - t < SUMMARIZE_RATE_WINDOW_MS);
-  if (timestamps.length >= SUMMARIZE_RATE_LIMIT) return false;
-  timestamps.push(now);
-  summarizeRateLimitMap.set(ip, timestamps);
-  return true;
-}
 
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -202,118 +187,9 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/v1/stats/summarize
- * Generates an AI narrative summary of the current dashboard stats.
- * Body: { provider: 'claude'|'glean', agency?: string, bureau?: string }
- */
-router.post('/summarize', async (req: Request, res: Response) => {
-  const ip = String(req.ip ?? req.socket.remoteAddress ?? 'unknown');
-  if (!checkSummarizeRateLimit(ip)) {
-    res.status(429).json({ error: 'Too many summary requests. Please wait a few minutes before trying again.' });
-    return;
-  }
-
-  const { provider = 'claude', agency = '', bureau = '' } = req.body as {
-    provider?: 'claude' | 'glean';
-    agency?: string;
-    bureau?: string;
-  };
-
-  if (provider === 'glean' && (!config.gleanApiKey || !config.gleanEndpoint)) {
-    res.status(400).json({ error: 'Glean API key and endpoint must be configured in Settings.' });
-    return;
-  }
-  if (provider === 'claude' && !config.anthropicApiKey) {
-    res.status(400).json({ error: 'Anthropic API key must be configured in Settings.' });
-    return;
-  }
-
-  // Re-run stats query for the requested scope
-  const conditions: string[] = [];
-  const params: Record<string, unknown> = {};
-  if (agency) { conditions.push('agency = :agency'); params.agency = agency; }
-  if (bureau) { conditions.push('bureau = :bureau'); params.bureau = bureau; }
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const qn = async (sql: string) => Number((await query(sql, params))[0]?.n ?? 0);
-
-  const total          = await qn(`SELECT COUNT(*) as n FROM sites ${where}`);
-  const live           = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} live = 1`);
-  const uswds          = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} uswds_count > 0`);
-  const dap            = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} dap = 1`);
-  const https_enforced = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} https_enforced = 1`);
-  const sitemap        = await qn(`SELECT COUNT(*) as n FROM sites ${where}${where ? ' AND' : ' WHERE'} sitemap_xml_detected = 1`);
-  const pct = (n: number) => total > 0 ? Math.round((n / total) * 1000) / 10 : 0;
-
-  const bureauWhere = agency ? 'WHERE agency = :agency AND bureau IS NOT NULL' : 'WHERE bureau IS NOT NULL';
-  const topBureauRows = await query<any>(`
-    SELECT bureau, COUNT(*) as count FROM sites ${bureauWhere}
-    GROUP BY bureau ORDER BY count DESC LIMIT 8
-  `, agency ? { agency } : {});
-  const topBureaus = topBureauRows.map((b: any) => `${b.bureau} (${b.count})`).join(', ');
-
-  const tpSumBaseConditions = conditions.length
-    ? conditions.map(c => `s.${c}`).join(' AND ') + ' AND '
-    : '';
-  const topTpRows = await query<any>(`
-    SELECT jt.elem AS domain, COUNT(DISTINCT s.domain) AS site_count
-    FROM sites s, JSON_TABLE(
-      s.third_party_service_domains,
-      '$[*]' COLUMNS (elem VARCHAR(500) PATH '$')
-    ) AS jt
-    WHERE ${tpSumBaseConditions}s.third_party_service_domains IS NOT NULL
-      AND JSON_VALID(s.third_party_service_domains)
-    GROUP BY jt.elem ORDER BY site_count DESC LIMIT 8
-  `, params);
-  const topTp = topTpRows.map((d: any) => d.domain).join(', ');
-
-  const scope = [agency && `Agency: ${agency}`, bureau && `Bureau: ${bureau}`].filter(Boolean).join(', ') || 'all agencies';
-  const statsText = [
-    `You are analyzing federal government website data from the GSA Site Scanner for ${scope}.`,
-    `Total websites: ${total.toLocaleString()}.`,
-    `Live sites: ${pct(live)}% (${live.toLocaleString()}).`,
-    `USWDS adoption: ${pct(uswds)}% (${uswds.toLocaleString()} sites use the US Web Design System).`,
-    `DAP analytics: ${pct(dap)}% (${dap.toLocaleString()} sites use the Digital Analytics Program).`,
-    `HTTPS enforced: ${pct(https_enforced)}% (${https_enforced.toLocaleString()} sites).`,
-    `Sitemap detected: ${pct(sitemap)}%.`,
-    `Top bureaus by site count: ${topBureaus || 'N/A'}.`,
-    `Top third-party domains: ${topTp || 'N/A'}.`,
-    `\nWrite a concise 3-5 paragraph executive summary of these metrics, noting strengths, gaps, and actionable recommendations for improving web standards compliance. Use plain prose without bullet points.`,
-  ].join(' ');
-
-  try {
-    let summary: string;
-
-    if (provider === 'claude') {
-      const Anthropic = (await import('@anthropic-ai/sdk')).default;
-      const client = new Anthropic({ apiKey: config.anthropicApiKey });
-      const msg = await client.messages.create({
-        model: 'claude-opus-4-5',
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: statsText }],
-      });
-      summary = (msg.content[0] as any).text || '';
-    } else {
-      // Glean: POST to the endpoint with the stats as the query
-      const { default: fetch } = await import('node-fetch');
-      const response = await fetch(config.gleanEndpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${config.gleanApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query: statsText, maxSnippetSize: 200 }),
-        signal: AbortSignal.timeout(30000),
-      });
-      const data = await response.json() as any;
-      summary = data?.answer?.text || data?.results?.[0]?.snippets?.[0]?.text || JSON.stringify(data);
-    }
-
-    res.json({ summary, scope, total_sites: total });
-  } catch (err: any) {
-    console.error('[stats] summarize error:', err.message);
-    res.status(500).json({ error: 'Summary generation failed' });
-  }
+// POST /api/v1/stats/summarize — AI summarization has been removed
+router.post('/summarize', (_req: Request, res: Response) => {
+  res.status(501).json({ error: 'AI summarization has been removed.' });
 });
 
 export default router;

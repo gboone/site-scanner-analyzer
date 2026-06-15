@@ -84,7 +84,6 @@ export default function SettingsView() {
   });
 
   const s = settings as Record<string, string>;
-  const [gleanStatus, setGleanStatus] = React.useState<string | null>(null);
   const [gsaStatus, setGsaStatus] = React.useState<string | null>(null);
   const [gsaAgency, setGsaAgency] = React.useState('');
   const [gsaImporting, setGsaImporting] = React.useState(false);
@@ -134,16 +133,6 @@ export default function SettingsView() {
   const handleSave = async (key: string, value: string) => {
     await api.setSetting(key, value);
     window.location.reload(); // Simple refresh to pick up new env
-  };
-
-  const testGlean = async () => {
-    setGleanStatus('Testing…');
-    try {
-      const r = await api.testGlean() as any;
-      setGleanStatus(r.connected ? '✓ Connected' : `✗ Failed: ${r.reason || r.status}`);
-    } catch (err: any) {
-      setGleanStatus(`✗ ${err.message}`);
-    }
   };
 
   const importFromGSA = async () => {
@@ -251,6 +240,21 @@ export default function SettingsView() {
     }
   };
 
+  // Claude chat settings — API key + model dropdown (populated from the Models API)
+  const { data: models = [] } = useQuery({
+    queryKey: ['models'],
+    queryFn: () => api.listModels().catch(() => [] as { id: string; display_name: string }[]),
+    enabled: !!s.ANTHROPIC_API_KEY,
+  });
+
+  const FALLBACK_MODELS: { id: string; display_name: string }[] = [
+    { id: 'claude-sonnet-4-6', display_name: 'Claude Sonnet 4.6' },
+    { id: 'claude-opus-4-8',   display_name: 'Claude Opus 4.8' },
+    { id: 'claude-haiku-4-5',  display_name: 'Claude Haiku 4.5' },
+  ];
+  const modelOptions = models.length ? models : FALLBACK_MODELS;
+  const currentModel = s.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
+
   const stopScan = async () => {
     setScanStopStatus('Stopping…');
     try {
@@ -273,32 +277,6 @@ export default function SettingsView() {
 
       <div className="bg-white rounded-lg border border-gray-200 px-4">
         <div className="py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100">
-          Glean (Primary LLM)
-        </div>
-        <SettingField
-          label="Glean Endpoint"
-          description="Your org's Glean API base URL"
-          value={s.GLEAN_ENDPOINT || ''}
-          onSave={(v) => handleSave('GLEAN_ENDPOINT', v)}
-          placeholder="https://your-org.glean.com/api/v1"
-        />
-        <SettingField
-          label="Glean API Key"
-          description="Bearer token for Glean Chat API"
-          value={s.GLEAN_API_KEY || ''}
-          onSave={(v) => handleSave('GLEAN_API_KEY', v)}
-          type="password"
-        />
-        <div className="py-3 flex items-center gap-3">
-          <button onClick={testGlean} className="btn-secondary text-xs">Test Connection</button>
-          {gleanStatus && (
-            <span className={`text-xs ${gleanStatus.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>
-              {gleanStatus}
-            </span>
-          )}
-        </div>
-
-        <div className="py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-y border-gray-100">
           GSA Site Scanner API
         </div>
         <SettingField
@@ -395,26 +373,49 @@ export default function SettingsView() {
           )}
         </div>
 
-        <div className="py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-y border-gray-100">
-          Anthropic Claude
+      </div>
+
+      {/* Claude chat */}
+      <div className="bg-white rounded-lg border border-gray-200 px-4 mt-6">
+        <div className="py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100">
+          Claude Chat
         </div>
+        <p className="text-xs text-gray-500 mt-3 mb-1">
+          Supply an Anthropic API key to chat about this data. Claude answers by
+          querying the same public REST endpoints the rest of the app uses.
+        </p>
         <SettingField
           label="Anthropic API Key"
-          description="For Claude-powered deep research briefings"
+          description="Stored server-side. Used to call the Claude API."
           value={s.ANTHROPIC_API_KEY || ''}
           onSave={(v) => handleSave('ANTHROPIC_API_KEY', v)}
           type="password"
         />
-        <div className="py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide border-y border-gray-100">
-          MCP Access
+        <div className="flex items-start gap-4 py-4">
+          <div className="w-56">
+            <div className="text-sm font-medium text-gray-800">Model</div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              {models.length
+                ? 'Live list from your account.'
+                : 'Showing common models — add a key to load the live list.'}
+            </div>
+          </div>
+          <div className="flex-1">
+            <select
+              value={currentModel}
+              aria-label="Claude model"
+              onChange={(e) => handleSave('ANTHROPIC_MODEL', e.target.value)}
+              className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gov-blue"
+            >
+              {modelOptions.some((m) => m.id === currentModel)
+                ? null
+                : <option value={currentModel}>{currentModel}</option>}
+              {modelOptions.map((m) => (
+                <option key={m.id} value={m.id}>{m.display_name || m.id}</option>
+              ))}
+            </select>
+          </div>
         </div>
-        <SettingField
-          label="MCP Auth Token"
-          description="Bearer token required to access the MCP endpoint. Set this and pass it as Authorization: Bearer <token> in Claude Desktop or Glean."
-          value={s.MCP_SECRET || ''}
-          onSave={(v) => handleSave('MCP_SECRET', v)}
-          type="password"
-        />
       </div>
 
       {/* Scheduled Jobs */}

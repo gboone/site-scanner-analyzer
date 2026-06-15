@@ -19,8 +19,6 @@ if (fs.existsSync(envPath)) {
 export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
   gsaApiKey: process.env.GSA_API_KEY || '',
-  gleanApiKey: process.env.GLEAN_API_KEY || '',
-  gleanEndpoint: process.env.GLEAN_ENDPOINT || '',
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
-  mcpAuthToken: process.env.MCP_SECRET || '',
+  anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
 };

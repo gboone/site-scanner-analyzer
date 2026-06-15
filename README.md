@@ -1,4 +1,4 @@
-# GSA Site Scanner Analyzer
+# GSA Site Scan Analyzer
 
 A local-first web application for exploring, re-scanning, and researching GSA Site Scanner data. Designed around a 343-site VA.gov dataset but works with any Site Scanner JSON export.
 

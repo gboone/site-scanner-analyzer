@@ -1,5 +1,5 @@
 /**
- * Site row normalization — shared between routes/report.ts and mcp/tools.ts.
+ * Site row normalization — used by routes/report.ts.
  *
  * Converts raw DB rows to clean output: parses JSON array columns,
  * coerces integers, structures wp_plugins, and strips nulls/empty values.

@@ -3,6 +3,7 @@ import Shell from './components/layout/Shell';
 import ExplorerView from './views/ExplorerView';
 import SqlView from './views/SqlView';
 import DashboardView from './views/DashboardView';
+import ChatView from './views/ChatView';
 import SettingsView from './views/SettingsView';
 import SiteReportView from './views/SiteReportView';
 import MultiSiteReportView from './views/MultiSiteReportView';
@@ -11,7 +12,7 @@ import { useUIStore } from './store/uiStore';
 import { ScanQueueProvider } from './contexts/ScanQueueContext';
 import { useUrlSync, decodeReport, encodeReport } from './hooks/useUrlSync';
 
-export type View = 'explorer' | 'sql' | 'dashboard' | 'settings' | 'site-report' | 'multi-report';
+export type View = 'explorer' | 'sql' | 'dashboard' | 'chat' | 'settings' | 'site-report' | 'multi-report';
 
 // Custom event used to focus the Explorer search input via Cmd+K
 export const FOCUS_SEARCH_EVENT = 'site-scanner:focus-search';
@@ -77,6 +78,7 @@ export default function App() {
           {currentView === 'explorer'    && <ExplorerView onNavigate={setCurrentView} />}
           {currentView === 'sql'         && <SqlView onNavigate={setCurrentView} />}
           {currentView === 'dashboard'   && <DashboardView onNavigate={setCurrentView} />}
+          {currentView === 'chat'        && <ChatView onNavigate={setCurrentView} />}
           {currentView === 'settings'    && <SettingsView />}
           {currentView === 'site-report' && <SiteReportView onNavigate={setCurrentView} />}
           {currentView === 'multi-report' && <MultiSiteReportView onNavigate={setCurrentView} />}

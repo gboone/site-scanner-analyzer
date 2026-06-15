@@ -241,7 +241,7 @@ export async function exportPPT(config: ReportConfig, stats: StatsResponse): Pro
       `• Report generated: ${generatedAt}`,
       `• Scope: ${scopeLabel}`,
       `• Total sites in scope: ${fmt(total)}`,
-      `• Data sourced from the Site Scanner Analyzer`,
+      `• Data sourced from the Site Scan Analyzer`,
       `• USWDS scores reflect the scoring rubric used by pulse.cio.gov`,
       `• Stale scan threshold: 90 days`,
       `• EOL CMS: Drupal 7, WordPress <6.0, SharePoint 2013/2016`,

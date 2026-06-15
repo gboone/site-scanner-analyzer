@@ -13,6 +13,7 @@ const NAV_ITEMS: Array<{ id: View; label: string; icon: string }> = [
   { id: 'explorer', label: 'Explorer', icon: '🔍' },
   { id: 'sql', label: 'SQL Query', icon: '💾' },
   { id: 'dashboard', label: 'Dashboard', icon: '📊' },
+  { id: 'chat', label: 'Chat', icon: '💬' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ];
 

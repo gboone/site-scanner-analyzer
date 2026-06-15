@@ -1,6 +1,5 @@
 import './config'; // Load env first
 import path from 'path';
-import crypto from 'crypto';
 import express from 'express';
 import cors from 'cors';
 import { config } from './config';
@@ -17,11 +16,10 @@ import briefingsRouter from './routes/briefings';
 import scanSessionsRouter from './routes/scan-sessions';
 import { agenciesRouter, bureausRouter } from './routes/agencies';
 import reportRouter from './routes/report';
-import mcpRouter from './routes/mcp';
 import schedulerRouter from './routes/scheduler';
 import agentRouter from './routes/agent';
+import { chatRouter, modelsRouter } from './routes/chat';
 import { setupScheduler, shutdown as shutdownScheduler } from './scheduler';
-import { validateUrlForSsrf } from './middleware/ssrf-protection';
 
 const app = express();
 
@@ -37,111 +35,6 @@ async function main() {
   });
   app.get('/healthz', (_req, res) => {
     res.json({ status: 'ok' });
-  });
-
-  // OAuth 2.0 Authorization Code + PKCE — Claude Enterprise initiates this flow
-  // when a user clicks "Connect" on the MCP connector.
-  //
-  // Flow: GET /authorize → redirect to claude.ai with code → POST /oauth/token
-  // exchanges code + PKCE verifier for a Bearer token used on /mcp requests.
-
-  // Short-lived auth codes: code → { codeChallenge, redirectUri, expiresAt }
-  const authCodes = new Map<string, {
-    codeChallenge: string;
-    redirectUri: string;
-    expiresAt: number;
-  }>();
-
-  app.get('/.well-known/oauth-authorization-server', (req, res) => {
-    const base = `${req.protocol}://${req.get('host')}`;
-    res.json({
-      issuer: base,
-      authorization_endpoint: `${base}/authorize`,
-      token_endpoint: `${base}/oauth/token`,
-      grant_types_supported: ['authorization_code'],
-      response_types_supported: ['code'],
-      code_challenge_methods_supported: ['S256'],
-      token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-    });
-  });
-
-  app.get('/authorize', (req, res) => {
-    const { response_type, client_id, redirect_uri, code_challenge, state } = req.query as Record<string, string>;
-    const configuredClientId = process.env.MCP_OAUTH_CLIENT_ID;
-    const mcpSecret = process.env.MCP_SECRET;
-
-    if (!configuredClientId || !mcpSecret) {
-      res.status(500).send('OAuth not configured');
-      return;
-    }
-    if (response_type !== 'code' || client_id !== configuredClientId || !redirect_uri || !code_challenge) {
-      res.status(400).send('Invalid authorization request');
-      return;
-    }
-
-    const code = crypto.randomBytes(32).toString('hex');
-    authCodes.set(code, { codeChallenge: code_challenge, redirectUri: redirect_uri, expiresAt: Date.now() + 5 * 60 * 1000 });
-
-    const dest = new URL(redirect_uri);
-    dest.searchParams.set('code', code);
-    if (state) dest.searchParams.set('state', state);
-    res.redirect(dest.toString());
-  });
-
-  app.post('/oauth/token', express.urlencoded({ extended: false }), (req, res) => {
-    const configuredClientId = process.env.MCP_OAUTH_CLIENT_ID;
-    const configuredSecret   = process.env.MCP_OAUTH_CLIENT_SECRET;
-    const mcpSecret          = process.env.MCP_SECRET;
-
-    if (!configuredClientId || !configuredSecret || !mcpSecret) {
-      res.status(500).json({ error: 'server_error', error_description: 'OAuth not configured' });
-      return;
-    }
-
-    // Accept client credentials via HTTP Basic or request body
-    let reqId: string | undefined;
-    let reqSecret: string | undefined;
-    const authHeader = req.headers.authorization ?? '';
-    if (authHeader.startsWith('Basic ')) {
-      const decoded = Buffer.from(authHeader.slice(6), 'base64').toString();
-      [reqId, reqSecret] = decoded.split(':', 2);
-    } else {
-      reqId     = req.body.client_id;
-      reqSecret = req.body.client_secret;
-    }
-
-    if (reqId !== configuredClientId || reqSecret !== configuredSecret) {
-      res.status(401).json({ error: 'invalid_client' });
-      return;
-    }
-
-    const { grant_type, code, code_verifier, redirect_uri } = req.body;
-
-    if (grant_type !== 'authorization_code') {
-      res.status(400).json({ error: 'unsupported_grant_type' });
-      return;
-    }
-
-    const stored = authCodes.get(code);
-    if (!stored || Date.now() > stored.expiresAt) {
-      authCodes.delete(code);
-      res.status(400).json({ error: 'invalid_grant' });
-      return;
-    }
-    if (stored.redirectUri !== redirect_uri) {
-      res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
-      return;
-    }
-
-    // Verify PKCE: BASE64URL(SHA256(code_verifier)) must equal stored code_challenge
-    const computed = crypto.createHash('sha256').update(code_verifier).digest('base64url');
-    if (computed !== stored.codeChallenge) {
-      res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
-      return;
-    }
-
-    authCodes.delete(code); // single use
-    res.json({ access_token: mcpSecret, token_type: 'Bearer', expires_in: 3600 });
   });
 
   // Start accepting connections NOW, before initDb() runs. Express registers
@@ -204,10 +97,8 @@ async function main() {
   // (.env values take precedence — only apply DB value if .env didn't already set it.)
   const configMap: Record<string, keyof typeof config> = {
     GSA_API_KEY:       'gsaApiKey',
-    GLEAN_API_KEY:     'gleanApiKey',
-    GLEAN_ENDPOINT:    'gleanEndpoint',
     ANTHROPIC_API_KEY: 'anthropicApiKey',
-    MCP_SECRET:        'mcpAuthToken',
+    ANTHROPIC_MODEL:   'anthropicModel',
   };
   const savedSettings = await query<{ key: string; value: string }>(
     'SELECT `key`, value FROM settings'
@@ -255,17 +146,8 @@ async function main() {
   app.use('/api/v1/bureaus',        bureausRouter);
   app.use('/api/v1/report',         reportRouter);
   app.use('/api/v1/scheduler',      schedulerRouter);
-  app.use('/mcp', cors({ origin: '*' }), (req, res, next) => {
-    const mcpSecret = process.env.MCP_SECRET;
-    if (mcpSecret) {
-      const auth = req.headers.authorization ?? '';
-      if (auth !== `Bearer ${mcpSecret}`) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-    }
-    next();
-  }, mcpRouter);
+  app.use('/api/v1/chat',           chatRouter);
+  app.use('/api/v1/models',         modelsRouter);
   app.use('/agent',                 agentRouter);
 
   // Settings endpoint (simple key/value store)
@@ -302,30 +184,6 @@ async function main() {
     res.json({ ok: true });
   });
 
-  app.get('/api/v1/settings/test-glean', async (_req, res) => {
-    if (!config.gleanEndpoint || !config.gleanApiKey) {
-      res.json({ connected: false, reason: 'Glean endpoint and API key not configured' });
-      return;
-    }
-    // Guard against SSRF — the endpoint URL may have been set via the settings UI,
-    // not just env vars, so we must validate it before fetching.
-    const ssrfError = await validateUrlForSsrf(config.gleanEndpoint);
-    if (ssrfError) {
-      res.status(403).json({ connected: false, reason: ssrfError });
-      return;
-    }
-    try {
-      const { default: fetch } = await import('node-fetch');
-      const response = await fetch(config.gleanEndpoint, {
-        headers: { 'Authorization': `Bearer ${config.gleanApiKey}` },
-        signal: AbortSignal.timeout(10000),
-      });
-      res.json({ connected: response.status < 500, status: response.status });
-    } catch (err: any) {
-      res.json({ connected: false, reason: err.message });
-    }
-  });
-
   // Health check (legacy — keep for existing clients)
   app.get('/api/v1/health', (_req, res) => {
     res.json({ ok: true, version: '1.0.0' });
@@ -337,7 +195,7 @@ async function main() {
   app.get('/api/v1/schema', (_req, res) => {
     res.json({
       info: {
-        title: 'Site Scanner Analyzer API',
+        title: 'Site Scan Analyzer API',
         description: 'Federal government website scan data. Use /api/v1/report to retrieve public website data for any agency or bureau by name.',
         version: '1.0.0',
       },
@@ -429,7 +287,6 @@ async function main() {
   // ---------------------------------------------------------------------------
   await setupScheduler();
 
-  console.log(`  - Glean: ${config.gleanEndpoint ? '✓ configured' : '✗ not configured'}`);
   console.log(`  - GSA API: ${config.gsaApiKey ? '✓ configured' : '✗ not configured'}`);
   console.log('✓ Startup complete — all routes active');
 }
