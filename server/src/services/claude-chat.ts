@@ -13,11 +13,26 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
+import { sanitizeSingleLine } from '../utils/sanitize';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
+
+/**
+ * A snapshot of the user's current Explore view, handed to the chat as starting
+ * context. All fields are user-influenced, so everything that lands in the prompt
+ * is sanitized in buildContextSection() before embedding (see sanitize.ts).
+ */
+export interface ChatContext {
+  description?: string;                         // human-readable filter summary
+  filters?: Record<string, unknown>;            // the query params behind the view
+  total?: number;                               // total rows matching the filter
+  sample?: Array<Record<string, unknown>>;      // a sample of matching rows
+}
+
+const CONTEXT_SAMPLE_CAP = 100;
 
 const MAX_TOOL_ITERATIONS = 8;
 const MAX_TOOL_RESULT_CHARS = 60_000; // guard against runaway context growth
@@ -32,7 +47,7 @@ const MAX_TOOL_RESULT_CHARS = 60_000; // guard against runaway context growth
 // public_only flag on get_stats) — see PLAN.md "Follow-ups".
 const SYSTEM_PROMPT = `You are a data analyst embedded in the GSA Site Scan Analyzer. You help users explore a database of U.S. federal government websites built from GSA Site Scanner data.
 
-Answer questions about the data by calling the provided tools. Prefer the structured tools (resolve_agency, get_stats, get_agency_report, get_site) for common questions, and use run_sql for anything that needs custom aggregation or filtering.
+Answer questions about the data by calling the provided tools. Prefer the structured tools (resolve_agency, get_stats, get_agency_report, get_site) for common questions, use list_sites to list or page through sites with the same filters the Explore UI uses, and use run_sql for anything that needs custom aggregation or filtering.
 
 The main table is \`sites\` (one row per domain). Useful columns include:
 - domain, agency, bureau, title, description, cms, language
@@ -110,7 +125,134 @@ const TOOLS: Anthropic.Tool[] = [
       required: ['sql'],
     },
   },
+  {
+    name: 'list_sites',
+    description:
+      'List sites with the same filters the Explore UI uses, returning a paginated page of full site records. Use this to reproduce, page through, or refine the set behind the user\'s current view. For aggregate counts across the whole set, prefer run_sql.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page: { type: 'integer', description: 'Page number, 1-indexed (default 1)' },
+        limit: { type: 'integer', description: 'Rows per page, max 5000 (default 25)' },
+        sort: { type: 'string', description: 'Column to sort by (e.g. pageviews, uswds_count, domain)' },
+        order: { type: 'string', enum: ['asc', 'desc'], description: 'Sort direction (default asc)' },
+        search: { type: 'string', description: 'Fuzzy match across domain, agency, bureau, title, city, state' },
+        agency: { type: 'string', description: 'Exact agency name' },
+        bureau: { type: 'string', description: 'Exact bureau name' },
+        branch: { type: 'string', description: 'Government branch / jurisdiction type' },
+        state: { type: 'string', description: 'Two-letter state code' },
+        live: { type: 'boolean', description: 'true = live sites only, false = non-live only' },
+        has_uswds: { type: 'boolean', description: 'true = uses U.S. Web Design System, false = does not' },
+        has_dap: { type: 'boolean', description: 'true = Digital Analytics Program present' },
+        https_enforced: { type: 'boolean', description: 'true = HTTPS enforced' },
+        public_only: { type: 'boolean', description: 'true = exclude staging/internal/non-public sites' },
+        cms: { type: 'string', description: 'CMS filter value (e.g. "Drupal", "WordPress")' },
+        cms_mode: { type: 'string', enum: ['contains', 'exact', 'excludes'], description: 'How to match cms (default contains)' },
+        column_filters: {
+          type: 'array',
+          description: 'Generic per-column filters mirroring the UI\'s advanced filters.',
+          items: {
+            type: 'object',
+            properties: {
+              field: { type: 'string', description: 'Column name' },
+              mode: {
+                type: 'string',
+                enum: ['contains', 'exact', 'not_exact', 'excludes', 'gt', 'lt', 'is_null', 'is_not_null'],
+                description: 'Match mode. is_null/is_not_null take no value.',
+              },
+              value: { type: 'string', description: 'Value to match (omit for is_null / is_not_null)' },
+            },
+            required: ['field'],
+          },
+        },
+      },
+    },
+  },
 ];
+
+const BOOL_PARAMS = new Set(['live', 'has_uswds', 'has_dap', 'https_enforced', 'public_only']);
+const STRING_PARAMS = new Set(['sort', 'order', 'search', 'agency', 'bureau', 'branch', 'state', 'cms', 'cms_mode']);
+
+/** Translate a list_sites tool input into a GET /sites query string. Exported for testing. */
+export function buildListSitesQuery(input: any): string {
+  const params = new URLSearchParams();
+  if (input?.page != null) params.set('page', String(input.page));
+  if (input?.limit != null) params.set('limit', String(input.limit));
+  for (const key of STRING_PARAMS) {
+    if (input?.[key] != null && input[key] !== '') params.set(key, String(input[key]));
+  }
+  for (const key of BOOL_PARAMS) {
+    if (typeof input?.[key] === 'boolean') params.set(key, String(input[key]));
+  }
+  if (Array.isArray(input?.column_filters)) {
+    for (const cf of input.column_filters) {
+      if (!cf || !cf.field) continue;
+      const mode = String(cf.mode ?? 'contains');
+      const isNullMode = mode === 'is_null' || mode === 'is_not_null';
+      if (!isNullMode && (cf.value == null || cf.value === '')) continue;
+      params.set(`cf_${cf.field}`, isNullMode ? '' : String(cf.value));
+      params.set(`cfm_${cf.field}`, mode);
+    }
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/**
+ * Build the "Current view" system-prompt section from an Explore context.
+ *
+ * Every user-influenced value is sanitized (control chars stripped) and embedded
+ * as JSON so the model treats it as inert data, not instructions — the same
+ * defense-in-depth pattern used elsewhere for stored prompt content. Exported for
+ * testing.
+ */
+export function buildContextSection(context: ChatContext): string {
+  const lines: string[] = [];
+  lines.push(
+    '\n\n# Current view',
+    'The user started this chat from a filtered view in the Explore UI. Treat the data below as their starting point — answer questions about it directly, but you may also query the full dataset (list_sites, run_sql, get_stats) to put it in broader context.'
+  );
+
+  const description = sanitizeSingleLine(context.description, 300);
+  if (description) lines.push(`\nFilter summary: ${JSON.stringify(description)}`);
+
+  if (context.filters && typeof context.filters === 'object') {
+    const safeFilters = sanitizeObject(context.filters);
+    if (Object.keys(safeFilters).length > 0) {
+      lines.push(
+        `\nThe view's filters map to these list_sites parameters (reuse them to reproduce or page through the set):\n${JSON.stringify(safeFilters)}`
+      );
+    }
+  }
+
+  const total = Number.isFinite(context.total) ? Number(context.total) : undefined;
+  const sample = Array.isArray(context.sample) ? context.sample.slice(0, CONTEXT_SAMPLE_CAP) : [];
+  if (total != null) lines.push(`\nTotal sites matching this view: ${total}.`);
+  if (sample.length > 0) {
+    const safeSample = sample.map(sanitizeObject);
+    const caveat =
+      total != null && total > sample.length
+        ? ` This is a sample of ${sample.length} of ${total}; use list_sites with the parameters above to page through the rest before making claims about the whole set.`
+        : '';
+    lines.push(`\nSample of the matching sites (key fields only):${caveat}\n${JSON.stringify(safeSample)}`);
+  }
+
+  return lines.join('\n');
+}
+
+/** Sanitize all string values in a flat object; non-strings pass through. */
+function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === 'string') {
+      const cleaned = sanitizeSingleLine(v, 500);
+      if (cleaned != null) out[k] = cleaned;
+    } else if (v != null) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
 
 function apiBase(): string {
   return `http://127.0.0.1:${config.port}/api/v1`;
@@ -155,6 +297,8 @@ async function runTool(name: string, input: any): Promise<string> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql: String(input?.sql ?? '') }),
       });
+    case 'list_sites':
+      return callRest(`/sites${buildListSitesQuery(input)}`);
     default:
       return `Unknown tool: ${name}`;
   }
@@ -165,12 +309,13 @@ export interface ChatResult {
   tools_used: string[];
 }
 
-export async function chat(messages: ChatMessage[]): Promise<ChatResult> {
+export async function chat(messages: ChatMessage[], context?: ChatContext): Promise<ChatResult> {
   if (!config.anthropicApiKey) {
     throw Object.assign(new Error('Anthropic API key is not configured. Add it in Settings.'), { status: 400 });
   }
 
   const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  const system = context ? SYSTEM_PROMPT + buildContextSection(context) : SYSTEM_PROMPT;
   const conversation: Anthropic.MessageParam[] = messages.map((m) => ({
     role: m.role,
     content: m.content,
@@ -181,7 +326,7 @@ export async function chat(messages: ChatMessage[]): Promise<ChatResult> {
     const response = await client.messages.create({
       model: config.anthropicModel,
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      system,
       tools: TOOLS,
       messages: conversation,
     });

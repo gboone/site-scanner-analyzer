@@ -10,7 +10,7 @@ import SiteDetail from '../components/site-detail/SiteDetail';
 import AgencyBureauFilter from '../components/AgencyBureauFilter';
 import { useSites, useScanSessions } from '../hooks/useSites';
 import { useHiddenSites } from '../hooks/useHiddenSites';
-import { useUIStore } from '../store/uiStore';
+import { useUIStore, type ExploreChatContext } from '../store/uiStore';
 import { useScanQueue } from '../contexts/ScanQueueContext';
 import { api } from '../lib/api';
 import { COLUMN_CATALOG, FILTERABLE_TYPES, getColumnMeta } from '../lib/columnCatalog';
@@ -157,7 +157,11 @@ interface Props {
 
 export default function ExplorerView({ onNavigate }: Props) {
   const { scan, startScan, stopScan } = useScanQueue();
-  const { openDetail, selectedDomain, detailPanelOpen, setReport, setFilter, activeFilters } = useUIStore();
+  const { openDetail, selectedDomain, detailPanelOpen, setReport, setFilter, activeFilters, setChatContext } = useUIStore();
+
+  // Chat is only offered when an Anthropic key is configured (same gate ChatView uses).
+  const { data: appSettings = {} } = useQuery({ queryKey: ['settings'], queryFn: () => api.getSettings() });
+  const hasAnthropicKey = !!(appSettings as Record<string, string>).ANTHROPIC_API_KEY;
   const { hidden, hide, unhide, clearAll: clearAllHidden } = useHiddenSites();
 
   const { initial, syncExplorerState } = useExplorerUrlSync();
@@ -229,7 +233,8 @@ export default function ExplorerView({ onNavigate }: Props) {
     const t = setTimeout(() => setDebouncedColumnFilters(columnFilters), 250);
     return () => clearTimeout(t);
   }, [columnFilters]);
-  const hasColumnFilters = Object.values(columnFilters).some((f) => f.value);
+  const isNullMode = (mode: string) => mode === 'is_null' || mode === 'is_not_null';
+  const hasColumnFilters = Object.values(columnFilters).some((f) => f.value || isNullMode(f.mode));
 
   const addColumnFilter = (field: string) => {
     const meta = getColumnMeta(field);
@@ -336,7 +341,7 @@ export default function ExplorerView({ onNavigate }: Props) {
   const activeColFilterParams = React.useMemo<Record<string, string>>(() => {
     const out: Record<string, string> = {};
     for (const [field, { value, mode }] of Object.entries(debouncedColumnFilters)) {
-      if (value) {
+      if (value || isNullMode(mode)) {
         out[`cf_${field}`] = value;
         out[`cfm_${field}`] = mode;
       }
@@ -725,6 +730,75 @@ export default function ExplorerView({ onNavigate }: Props) {
     onNavigate('dashboard');
   };
 
+  /**
+   * Capture the current filtered view as chat context and jump to the Chat view.
+   * Reuses the same filter serialization as the "Static page" link, plus a
+   * human-readable summary and a sample of the loaded rows (key fields only).
+   */
+  const startChatAboutView = () => {
+    const CHIP_LABELS: Record<string, string> = {
+      live: 'live', has_uswds: 'USWDS', no_sitemap: 'no sitemap', has_dap: 'DAP',
+      https_enforced: 'HTTPS enforced', has_login: 'has login',
+      no_redirect: 'no redirect', public_only: 'public',
+    };
+    const SAMPLE_FIELDS = [
+      'domain', 'agency', 'bureau', 'cms', 'pageviews', 'live',
+      'uswds_count', 'https_enforced', 'status_code', 'title',
+    ];
+
+    // Filters → list_sites params
+    const filterParams: Record<string, string | boolean> = {};
+    for (const [k, v] of Object.entries(filters)) {
+      if (v && k !== 'show_hidden') filterParams[k] = v;
+    }
+    if (search) filterParams.search = search;
+    if (agencyFilter) filterParams.agency = agencyFilter;
+    if (bureauFilter) filterParams.bureau = bureauFilter;
+    if (domainTypeFilter) filterParams.branch = domainTypeFilter;
+    if (stateFilter) filterParams.state = stateFilter;
+    for (const [field, { value, mode }] of Object.entries(columnFilters)) {
+      if (value || isNullMode(mode)) { filterParams[`cf_${field}`] = value; filterParams[`cfm_${field}`] = mode; }
+    }
+
+    // Human-readable summary
+    const parts: string[] = [];
+    if (agencyFilter) parts.push(agencyFilter);
+    if (bureauFilter) parts.push(bureauFilter);
+    if (domainTypeFilter) parts.push(domainTypeFilter);
+    if (stateFilter) parts.push(`state ${stateFilter}`);
+    if (search) parts.push(`search "${search}"`);
+    for (const [k, v] of Object.entries(filters)) {
+      if (!v || k === 'show_hidden') continue;
+      const label = CHIP_LABELS[k] ?? k;
+      parts.push(v === 'false' ? `not ${label}` : label);
+    }
+    for (const [field, { value, mode }] of Object.entries(columnFilters)) {
+      if (value || isNullMode(mode)) {
+        const modeLabel = mode === 'is_null' ? 'is empty' : mode === 'is_not_null' ? 'is not empty' : mode;
+        parts.push(isNullMode(mode) ? `${getColumnMeta(field).label} ${modeLabel}` : `${getColumnMeta(field).label} ${modeLabel} ${value}`);
+      }
+    }
+    const description = parts.length ? parts.join(' · ') : 'All sites';
+
+    // Sample: trim loaded rows to key fields (cap 100)
+    const rows: any[] = data?.data || [];
+    const sample = rows.slice(0, 100).map((r) => {
+      const out: Record<string, unknown> = {};
+      for (const f of SAMPLE_FIELDS) if (r[f] !== undefined && r[f] !== null) out[f] = r[f];
+      return out;
+    });
+
+    const context: ExploreChatContext = {
+      description,
+      filters: filterParams,
+      total: data?.total ?? sample.length,
+      sample,
+      createdAt: new Date().toISOString(),
+    };
+    setChatContext(context);
+    onNavigate('chat');
+  };
+
   /** Navigate to the multi-site summary report (capped at 50). */
   const generateSummaryReport = () => {
     const domains = Array.from(selectedDomains).slice(0, 50);
@@ -775,6 +849,16 @@ export default function ExplorerView({ onNavigate }: Props) {
               onAddColumn={addExtraColumn}
               onRemoveColumn={removeExtraColumn}
             />
+            {hasAnthropicKey && (
+              <button
+                onClick={startChatAboutView}
+                disabled={(data?.total ?? 0) === 0}
+                className="text-xs px-2 py-0.5 rounded border bg-white text-gov-blue border-blue-200 hover:border-gov-blue hover:bg-blue-50 transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Start a chat with Claude about the sites in this view"
+              >
+                💬 Chat about these sites
+              </button>
+            )}
             <a
               href={(() => {
                 const p = new URLSearchParams();
@@ -788,7 +872,7 @@ export default function ExplorerView({ onNavigate }: Props) {
                 if (stateFilter) p.set('state', stateFilter);
                 // Generic column filters
                 for (const [field, { value, mode }] of Object.entries(columnFilters)) {
-                  if (value) { p.set(`cf_${field}`, value); p.set(`cfm_${field}`, mode); }
+                  if (value || isNullMode(mode)) { p.set(`cf_${field}`, value); p.set(`cfm_${field}`, mode); }
                 }
                 const qs = p.toString();
                 return `/agent/sites${qs ? `?${qs}` : ''}`;
@@ -872,33 +956,45 @@ export default function ExplorerView({ onNavigate }: Props) {
                   <label className="text-xs text-gray-500 shrink-0">{meta.label}</label>
                   <select
                     value={mode}
-                    onChange={(e) => updateColumnFilter(field, value, e.target.value)}
+                    onChange={(e) => {
+                      const newMode = e.target.value;
+                      // Clear value when switching to/from null modes
+                      updateColumnFilter(field, isNullMode(newMode) ? '' : value, newMode);
+                    }}
                     className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-700"
                     aria-label={`${meta.label} match mode`}
                   >
                     {isInt ? (
                       <>
                         <option value="exact">equals</option>
+                        <option value="not_exact">not equals</option>
                         <option value="gt">greater than</option>
                         <option value="lt">less than</option>
+                        <option value="is_null">is empty</option>
+                        <option value="is_not_null">is not empty</option>
                       </>
                     ) : (
                       <>
                         <option value="contains">contains</option>
-                        <option value="exact">is exactly</option>
                         <option value="excludes">excludes</option>
+                        <option value="exact">is exactly</option>
+                        <option value="not_exact">is not exactly</option>
+                        <option value="is_null">is empty / null</option>
+                        <option value="is_not_null">is not empty</option>
                       </>
                     )}
                   </select>
-                  <input
-                    type={isInt ? 'number' : 'text'}
-                    value={value}
-                    onChange={(e) => updateColumnFilter(field, e.target.value, mode)}
-                    placeholder="value"
-                    className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-32"
-                    aria-label={`${meta.label} filter value`}
-                    autoFocus={!value}
-                  />
+                  {!isNullMode(mode) && (
+                    <input
+                      type={isInt ? 'number' : 'text'}
+                      value={value}
+                      onChange={(e) => updateColumnFilter(field, e.target.value, mode)}
+                      placeholder="value"
+                      className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white text-gray-700 w-32"
+                      aria-label={`${meta.label} filter value`}
+                      autoFocus={!value}
+                    />
+                  )}
                   <button
                     onClick={() => removeColumnFilter(field)}
                     className="text-gray-400 hover:text-gray-600 text-xs"

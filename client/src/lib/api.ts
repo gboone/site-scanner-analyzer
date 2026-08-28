@@ -92,10 +92,13 @@ export const api = {
 
   // Claude chat over the site data
   listModels: () => request<{ id: string; display_name: string }[]>('/models'),
-  chat: (messages: { role: 'user' | 'assistant'; content: string }[]) =>
+  chat: (
+    messages: { role: 'user' | 'assistant'; content: string }[],
+    context?: object
+  ) =>
     request<{ reply: string; tools_used: string[] }>('/chat', {
       method: 'POST',
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify(context ? { messages, context } : { messages }),
     }),
   resolveAgency: (q: string) =>
     request<{

@@ -104,9 +104,9 @@ export function useExplorerUrlSync() {
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const syncExplorerState = React.useCallback((state: ExplorerSyncState) => {
-    // Encode column filters as base64 JSON (only active ones)
+    // Encode column filters as base64 JSON (only active ones, including null-mode filters)
     const activeCf = Object.fromEntries(
-      Object.entries(state.columnFilters).filter(([, v]) => v.value)
+      Object.entries(state.columnFilters).filter(([, v]) => v.value || v.mode === 'is_null' || v.mode === 'is_not_null')
     );
     const cfEncoded = Object.keys(activeCf).length
       ? encodeB64(JSON.stringify(activeCf))

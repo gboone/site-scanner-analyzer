@@ -10,6 +10,7 @@ import { fetchRobotsTxt } from './robots';
 import { detectTech } from './techDetector';
 import { resolveDns } from './dns';
 import { checkHostingProvider } from './wellKnown';
+import { discoverSubdomains } from './subdomains';
 import { query, execute } from '../db';
 import type { ScanResult } from 'shared';
 
@@ -69,9 +70,10 @@ async function runScan(url: string): Promise<ScanResult> {
   ]);
 
   if (result.tech_stack) {
+    // Priority: well-known declaration > header/HTML detection > DNS inference
     if (wellKnownProvider) {
       result.tech_stack.hosting_provider = wellKnownProvider;
-    } else if (result.dns?.hosting_provider) {
+    } else if (!result.tech_stack.hosting_provider && result.dns?.hosting_provider) {
       result.tech_stack.hosting_provider = result.dns.hosting_provider;
     }
   }
@@ -383,5 +385,65 @@ export async function scanAndStore(domain: string, url: string): Promise<{ scan_
   updates.domain = domain;
   await execute(`UPDATE sites SET ${setClause} WHERE domain = :domain`, updates);
 
+  // Fire-and-forget subdomain discovery via CT logs (crt.sh).
+  // Federal .gov domains are excluded — GSA's site scanner API already covers all federal
+  // subdomains and is imported via /api/v1/gsa. We only run discovery for:
+  //   • All non-.gov domains
+  //   • .gov domains whose branch is NOT "Federal*" (state, local, tribal, territorial, city)
+  //     per CISA's .gov registrar list — these aren't in GSA's scan data.
+  // Discovered subdomains are inserted as stubs for future scans; INSERT IGNORE handles dupes.
+  const shouldDiscover = await (async () => {
+    if (!domain.toLowerCase().endsWith('.gov')) return true;
+    const rows = await query<{ branch: string | null }>('SELECT branch FROM sites WHERE domain = ?', [domain]);
+    const branch = rows[0]?.branch ?? null;
+    return branch === null || !branch.startsWith('Federal');
+  })();
+
+  if (shouldDiscover) {
+    const baseDomain = extractBaseDomain(domain);
+    withDiscoverySlot(() => discoverSubdomains(baseDomain)).then(async (subdomains) => {
+      const capped = subdomains.slice(0, 100); // cap per scan to avoid runaway inserts
+      if (capped.length === 0) return;
+      try {
+        const placeholders = capped.map(() => '(?)').join(', ');
+        await execute(`INSERT IGNORE INTO sites (domain) VALUES ${placeholders}`, capped);
+      } catch { /* ignore duplicate or constraint errors */ }
+    }).catch(() => {});
+  }
+
   return { scan_id };
+}
+
+// usTLD state/local government domains (state.pa.us, ci.seattle.wa.us, k12.ca.us, ...) put
+// the registrable name one label deeper than a normal 2-label suffix. This isn't a full
+// public-suffix-list implementation — just enough to stop crt.sh queries for these domains
+// from being over-broadened to the bare state suffix (e.g. "pa.us" instead of "state.pa.us").
+const MULTI_LABEL_TLDS = new Set(['us']);
+
+function extractBaseDomain(hostname: string): string {
+  const parts = hostname.toLowerCase().split('.');
+  if (parts.length <= 2) return hostname;
+  const labelCount = MULTI_LABEL_TLDS.has(parts[parts.length - 1]) ? 3 : 2;
+  return parts.slice(-Math.min(labelCount, parts.length)).join('.');
+}
+
+// Bounds concurrent crt.sh lookups regardless of how many scans are in flight —
+// scanAndStore intentionally doesn't await discovery, so the scan queue's own
+// concurrency cap (server/src/lib/scan-queue.ts) doesn't apply to it.
+const MAX_CONCURRENT_SUBDOMAIN_DISCOVERY = 3;
+let activeDiscoveries = 0;
+const discoveryWaiters: Array<() => void> = [];
+
+async function withDiscoverySlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (activeDiscoveries >= MAX_CONCURRENT_SUBDOMAIN_DISCOVERY) {
+    await new Promise<void>((resolve) => discoveryWaiters.push(resolve));
+  }
+  activeDiscoveries++;
+  try {
+    return await fn();
+  } finally {
+    activeDiscoveries--;
+    const next = discoveryWaiters.shift();
+    if (next) next();
+  }
 }

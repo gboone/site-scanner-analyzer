@@ -35,6 +35,8 @@ const IDENTIFIER_RE = /^[a-z_][a-z0-9_]*$/i;
 /**
  * Parse all `cf_*` / `cfm_*` params from a request into SQL fragments.
  * Returns conditions (AND-able) and named params to merge into your query params.
+ *
+ * Modes: contains (default) | exact | excludes | not_exact | gt | lt | is_null | is_not_null
  */
 export function buildColumnFilters(req: Request): {
   conditions: string[];
@@ -47,12 +49,27 @@ export function buildColumnFilters(req: Request): {
     if (!key.startsWith('cf_')) continue;
     const field = key.slice(3);
     if (!CF_FILTERABLE.has(field) || !IDENTIFIER_RE.test(field)) continue;
+    const mode = String(req.query[`cfm_${field}`] ?? 'contains');
+
+    // Null-check modes require no value
+    if (mode === 'is_null') {
+      conditions.push(`(\`${field}\` IS NULL OR \`${field}\` = '')`);
+      continue;
+    }
+    if (mode === 'is_not_null') {
+      conditions.push(`(\`${field}\` IS NOT NULL AND \`${field}\` != '')`);
+      continue;
+    }
+
     const val = String(rawVal ?? '').trim();
     if (!val) continue;
-    const mode = String(req.query[`cfm_${field}`] ?? 'contains');
     const paramKey = `cf_${field}`;
+
     if (mode === 'exact') {
       conditions.push(`\`${field}\` = :${paramKey}`);
+      params[paramKey] = val;
+    } else if (mode === 'not_exact') {
+      conditions.push(`(\`${field}\` != :${paramKey} OR \`${field}\` IS NULL)`);
       params[paramKey] = val;
     } else if (mode === 'excludes') {
       conditions.push(`(\`${field}\` NOT LIKE :${paramKey} OR \`${field}\` IS NULL)`);

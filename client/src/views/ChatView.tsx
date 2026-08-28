@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useUIStore } from '../store/uiStore';
 import type { View } from '../App';
 
 interface Props {
@@ -27,11 +28,24 @@ export default function ChatView({ onNavigate }: Props) {
   });
   const hasKey = !!(settings as Record<string, string>).ANTHROPIC_API_KEY;
 
+  const { chatContext, clearChatContext } = useUIStore();
+
   const [turns, setTurns] = React.useState<Turn[]>([]);
   const [draft, setDraft] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  // Context-aware starter prompts when arriving from an Explore view.
+  const agencyName = (chatContext?.filters.agency as string) || 'this agency';
+  const suggestions = chatContext
+    ? [
+        'Summarize these sites for me.',
+        'How many of these have more than 10,000 monthly pageviews?',
+        `How do these fit into a broader narrative about ${agencyName}'s web footprint?`,
+        'Which of these are not using the U.S. Web Design System?',
+      ]
+    : SUGGESTIONS;
 
   React.useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -47,7 +61,7 @@ export default function ChatView({ onNavigate }: Props) {
     setLoading(true);
     try {
       const payload = next.map((t) => ({ role: t.role, content: t.content }));
-      const res = await api.chat(payload);
+      const res = await api.chat(payload, chatContext ?? undefined);
       setTurns((prev) => [...prev, { role: 'assistant', content: res.reply, tools_used: res.tools_used }]);
     } catch (err: any) {
       setError(err.message);
@@ -70,8 +84,11 @@ export default function ChatView({ onNavigate }: Props) {
           <h1 className="text-lg font-bold text-gray-900">Chat</h1>
           <p className="text-xs text-gray-500">Ask questions about the site scan data — Claude queries it for you.</p>
         </div>
-        {turns.length > 0 && (
-          <button onClick={() => { setTurns([]); setError(null); }} className="btn-secondary text-xs">
+        {(turns.length > 0 || chatContext) && (
+          <button
+            onClick={() => { setTurns([]); setError(null); clearChatContext(); }}
+            className="btn-secondary text-xs"
+          >
             New chat
           </button>
         )}
@@ -91,11 +108,32 @@ export default function ChatView({ onNavigate }: Props) {
       ) : (
         <>
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            {chatContext && (
+              <div className="max-w-2xl mx-auto w-full">
+                <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-gray-700">
+                  <span className="shrink-0">📊</span>
+                  <div className="flex-1">
+                    <span className="font-medium text-gov-blue">Chatting about your Explore view:</span>{' '}
+                    {chatContext.description}{' '}
+                    <span className="text-gray-500">
+                      ({chatContext.total.toLocaleString()} {chatContext.total === 1 ? 'site' : 'sites'})
+                    </span>
+                  </div>
+                  <button
+                    onClick={clearChatContext}
+                    className="shrink-0 text-gray-400 hover:text-gray-600"
+                    title="Drop this context and chat about all sites"
+                    aria-label="Clear view context"
+                  >✕</button>
+                </div>
+              </div>
+            )}
+
             {turns.length === 0 && (
               <div className="max-w-2xl mx-auto pt-8">
                 <p className="text-sm text-gray-500 mb-3">Try asking:</p>
                 <div className="grid gap-2">
-                  {SUGGESTIONS.map((s) => (
+                  {suggestions.map((s) => (
                     <button
                       key={s}
                       onClick={() => send(s)}

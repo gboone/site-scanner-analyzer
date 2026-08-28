@@ -27,13 +27,13 @@ function detectCms(html: string, headers: Record<string, string>): string | null
   if (headers['x-powered-by']?.toLowerCase().includes('wordpress')) wpScore += 40;
   scores['WordPress'] = wpScore;
 
-  // Drupal
+  // Drupal — scored separately; version + distribution detected below
   let drupalScore = 0;
   if (/drupal/i.test(html)) drupalScore += 30;
   if (html.includes('/sites/default/files/')) drupalScore += 30;
-  if (html.includes('Drupal.settings')) drupalScore += 40;
+  if (html.includes('Drupal.settings') || html.includes('drupalSettings')) drupalScore += 40;
   if (headers['x-generator']?.toLowerCase().includes('drupal')) drupalScore += 50;
-  if (headers['x-drupal-cache']) drupalScore += 30;
+  if (headers['x-drupal-cache'] || headers['x-drupal-dynamic-cache']) drupalScore += 30;
   scores['Drupal'] = drupalScore;
 
   // Joomla
@@ -55,6 +55,28 @@ function detectCms(html: string, headers: Record<string, string>): string | null
   if (/sitecore/i.test(html)) sitecoreScore += 10; // weak on its own; needs corroboration
   scores['Sitecore'] = sitecoreScore;
 
+  // Adobe Experience Manager — requires 2+ independent signals for confidence
+  let aemScore = 0;
+  if (/<meta[^>]*generator[^>]*Adobe Experience Manager/i.test(html)) aemScore += 100;
+  if (/<meta[^>]*generator[^>]*\bCQ\b/i.test(html)) aemScore += 70; // old AEM name
+  if (/\/etc\.clientlibs\//i.test(html)) aemScore += 50; // very distinctive AEM path
+  if (/\/etc\/clientlibs\//i.test(html)) aemScore += 40;
+  if (/\/_jcr_content\//i.test(html)) aemScore += 40; // JCR repository paths
+  if (/\/content\/dam\//i.test(html)) aemScore += 30; // AEM Digital Asset Manager
+  if (/data-sly-/i.test(html)) aemScore += 30; // Sightly/HTL template attribute
+  scores['Adobe Experience Manager'] = aemScore;
+
+  // Granicus govAccess — government meeting/agenda management platform
+  // Requires 2+ signals; a lone govaccess or granicus.com reference scores below threshold
+  let granicusScore = 0;
+  if (/<script[^>]*src=["'][^"']*granicus\.com/i.test(html)) granicusScore += 50;
+  if (/govaccess/i.test(html)) granicusScore += 50;
+  if (/capi\.granicus\.com/i.test(html)) granicusScore += 40;
+  if (/granicus\.com\/ViewPublisher/i.test(html)) granicusScore += 40;
+  if (/host\.legistar\.com/i.test(html)) granicusScore += 30; // Legistar is Granicus-owned
+  if (/minutestraq\.com/i.test(html)) granicusScore += 30; // Granicus subsidiary
+  scores['Granicus govAccess'] = granicusScore;
+
   // Squarespace
   if (htmlLower.includes('squarespace')) scores['Squarespace'] = 60;
 
@@ -70,7 +92,29 @@ function detectCms(html: string, headers: Record<string, string>): string | null
     if (score > highest.score) highest = { name, score };
   }
 
-  return highest.score >= 40 ? highest.name : null;
+  if (highest.score < 40) return null;
+
+  // Drupal: augment with version and distribution when detectable
+  if (highest.name === 'Drupal') {
+    // Version from header (e.g. "Drupal 10 (https://www.drupal.org)")
+    const verFromHeader = headers['x-generator']?.match(/Drupal\s+([\d]+)/i)?.[1];
+    // Version from meta generator tag
+    const verFromMeta = html.match(/<meta[^>]*name=["']Generator["'][^>]*content=["']Drupal\s+([\d]+)/i)?.[1]
+      ?? html.match(/<meta[^>]*content=["']Drupal\s+([\d]+)[^"']*["'][^>]*name=["']Generator["']/i)?.[1];
+    const majorVersion = verFromHeader ?? verFromMeta ?? null;
+
+    // Known Drupal distributions — check meta generator and distinctive paths
+    if (/<meta[^>]*generator[^>]*OpenPublic/i.test(html) || /openatrium/i.test(html)) {
+      return majorVersion ? `Drupal ${majorVersion} (OpenPublic)` : 'Drupal (OpenPublic)';
+    }
+    if (/govdelivery/i.test(html) && drupalScore >= 40) {
+      return majorVersion ? `Drupal ${majorVersion} (GovDelivery)` : 'Drupal (GovDelivery)';
+    }
+
+    return majorVersion ? `Drupal ${majorVersion}` : 'Drupal';
+  }
+
+  return highest.name;
 }
 
 function detectWebServer(headers: Record<string, string>): string | null {
@@ -91,6 +135,13 @@ function detectCdn(headers: Record<string, string>, html: string): string | null
   if (headers['x-fastly-request-id'] || headers['via']?.includes('fastly')) return 'Fastly';
   if (headers['x-akamai-transformed'] || headers['server']?.includes('AkamaiGHost')) return 'Akamai';
   if (headers['via']?.toLowerCase().includes('squid')) return 'Squid';
+  return null;
+}
+
+function detectHostingProviderFromHeaders(headers: Record<string, string>, html: string): string | null {
+  // WP Engine — definitive header signals
+  if (headers['x-wpe-backend'] || headers['x-wpe-request-id'] || /wpe-bg/.test(headers['server'] ?? '')) return 'WP Engine';
+  if (html.includes('wpenginepowered.com')) return 'WP Engine';
   return null;
 }
 
@@ -254,6 +305,7 @@ export async function detectTech(url: string): Promise<TechStackResult> {
       https_enforced: url.startsWith('https://'),
       hsts: false,
       login_gate: false,
+      title: null,
     };
   }
 
@@ -300,6 +352,9 @@ export async function detectTech(url: string): Promise<TechStackResult> {
     'New Relic': ['js-agent.newrelic.com', 'newrelic.com/js'],
     'Quantum Metric': ['cdn.quantummetric.com', 'ptotal.quantummetric'],
     'Qualtrics': ['siteintercept.qualtrics.com', 'iad1.qualtrics.com'],
+    // GXI (Government Experience Insights) — GSA-managed Qualtrics-based CX platform
+    'GXI': ['gxi.qualtrics.com', 'gxi-insights'],
+    'Medallia': ['medallia.com/mdn/', 'medallia.eu/mdn/', 'nebula.medallia.com'],
   };
 
   const htmlLower = html.toLowerCase();
@@ -341,10 +396,15 @@ export async function detectTech(url: string): Promise<TechStackResult> {
 
   const login_gate = detectLoginGate(url, html, responseStatus);
 
-  // hosting_provider is filled in by the orchestrator from DNS results
+  const pageTitleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(html);
+  const title = pageTitleMatch ? pageTitleMatch[1].trim() : null;
+
+  // Hosting provider from headers/HTML (DNS-based detection happens server-side in orchestrator)
+  const hosting_provider = detectHostingProviderFromHeaders(responseHeaders, html);
+
   return {
-    cms, web_server: webServer, analytics, cdn, hosting_provider: null,
+    cms, web_server: webServer, analytics, cdn, hosting_provider,
     wordpress, technologies, security_headers, uswds, dap,
-    https_enforced, hsts, login_gate,
+    https_enforced, hsts, login_gate, title,
   };
 }

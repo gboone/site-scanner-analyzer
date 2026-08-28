@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "test": "npx tsx --test src/utils/sanitize.test.ts src/utils/publicFilter.test.ts src/middleware/ssrf-protection.test.ts src/routes/agencies.test.ts",
+    "test": "npx tsx --test src/utils/sanitize.test.ts src/utils/publicFilter.test.ts src/middleware/ssrf-protection.test.ts src/routes/agencies.test.ts src/services/claude-chat.test.ts",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:generate": "drizzle-kit generate"

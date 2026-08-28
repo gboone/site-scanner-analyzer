@@ -102,11 +102,12 @@ export async function scanSite(
 
   // Priority merge for hosting_provider (post-allSettled so all signals are in):
   // 1. .well-known/hosting-provider (authoritative declaration by the host operator)
-  // 2. DNS NS/IP inference (useful heuristic, but NS ≠ origin host)
+  // 2. header/HTML detection (set in detectTech, e.g. WP Engine response headers)
+  // 3. DNS NS/IP inference (useful heuristic, but NS ≠ origin host)
   if (result.tech_stack) {
     if (wellKnownProvider) {
       result.tech_stack.hosting_provider = wellKnownProvider;
-    } else if (result.dns?.hosting_provider) {
+    } else if (!result.tech_stack.hosting_provider && result.dns?.hosting_provider) {
       result.tech_stack.hosting_provider = result.dns.hosting_provider;
     }
   }

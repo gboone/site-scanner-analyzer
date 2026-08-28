@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { chat, listModels, type ChatMessage } from '../services/claude-chat';
+import { chat, listModels, type ChatMessage, type ChatContext } from '../services/claude-chat';
 
 export const chatRouter = Router();
 export const modelsRouter = Router();
@@ -39,14 +39,18 @@ chatRouter.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  const { messages } = req.body as { messages?: unknown };
+  const { messages, context } = req.body as { messages?: unknown; context?: unknown };
   if (!isValidMessages(messages)) {
     res.status(400).json({ error: 'messages must be a non-empty array of { role, content }' });
     return;
   }
 
+  // context is optional and best-effort; the service sanitizes everything it embeds.
+  const safeContext: ChatContext | undefined =
+    context && typeof context === 'object' && !Array.isArray(context) ? (context as ChatContext) : undefined;
+
   try {
-    const result = await chat(messages);
+    const result = await chat(messages, safeContext);
     res.json(result);
   } catch (err: any) {
     const status = typeof err?.status === 'number' ? err.status : 500;
