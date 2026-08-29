@@ -90,6 +90,9 @@ Full variable reference:
 | `ANTHROPIC_API_KEY` | For Claude briefings | Anthropic API key |
 | `AUTH_PASSWORD` | Production only | Enables HTTP Basic Auth; omit in dev |
 | `PORT` | No (default: `3001`) | Server port |
+| `ALLOWED_IPS` | Production only | Comma-separated IPs/CIDRs allowed to reach UI routes (see [ADR 0001](docs/adr/0001-app-level-access-control.md)) |
+| `AUTOMATTIC_NETWORK_CIDRS` | Production only | Comma-separated CIDR ranges always admitted by the access-control gates; starts empty pending VIP Support |
+| `SCANNER_API_TOKEN` | Production only | Shared-secret bearer token required on `/api/v1/*` for callers outside `ALLOWED_IPS` |
 
 ### 4. Install dependencies
 

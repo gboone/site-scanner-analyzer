@@ -16,9 +16,19 @@ if (fs.existsSync(envPath)) {
   }
 }
 
+export function parseIpList(value: string | undefined): string[] {
+  return (value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
   gsaApiKey: process.env.GSA_API_KEY || '',
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+  allowedIps: parseIpList(process.env.ALLOWED_IPS),
+  automatticNetworkCidrs: parseIpList(process.env.AUTOMATTIC_NETWORK_CIDRS),
+  scannerApiToken: process.env.SCANNER_API_TOKEN || '',
 };
