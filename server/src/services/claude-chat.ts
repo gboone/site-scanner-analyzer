@@ -259,9 +259,13 @@ function apiBase(): string {
 }
 
 /** Fetch a REST endpoint over loopback and return the raw body as a string. */
-async function callRest(path: string, init?: RequestInit): Promise<string> {
+export async function callRest(path: string, init?: RequestInit): Promise<string> {
   try {
-    const res = await fetch(`${apiBase()}${path}`, init);
+    // Loopback traffic has no reason to be in ALLOWED_IPS, so it can't rely
+    // on apiTokenGate's dual-path IP check — attach the real token instead.
+    // See docs/adr/0001-app-level-access-control.md.
+    const headers = { ...init?.headers, Authorization: `Bearer ${config.scannerApiToken}` };
+    const res = await fetch(`${apiBase()}${path}`, { ...init, headers });
     const body = await res.text();
     const out = res.ok ? body : `Request failed (HTTP ${res.status}): ${body}`;
     return out.length > MAX_TOOL_RESULT_CHARS

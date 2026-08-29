@@ -20,6 +20,8 @@ import schedulerRouter from './routes/scheduler';
 import agentRouter from './routes/agent';
 import { chatRouter, modelsRouter } from './routes/chat';
 import { setupScheduler, shutdown as shutdownScheduler } from './scheduler';
+import { ipAllowlistGate } from './middleware/ipAllowlist';
+import { apiTokenGate } from './middleware/apiToken';
 
 const app = express();
 
@@ -129,6 +131,14 @@ async function main() {
     : /^http:\/\/localhost(:\d+)?$/;
   app.use(cors({ origin: corsOrigin }));
   app.use(express.json({ limit: '50mb' })); // Large JSON imports
+
+  // Path-scoped access control (see docs/adr/0001-app-level-access-control.md):
+  // ipAllowlistGate is mounted globally but exempts /api/v1 and /agent
+  // internally, since those have their own gate (or are deliberately open).
+  // apiTokenGate is scoped to /api/v1 and admits an already-allowed IP
+  // without a token (dual-path) so the SPA's own browser calls keep working.
+  app.use(ipAllowlistGate);
+  app.use('/api/v1', apiTokenGate);
 
   // ---------------------------------------------------------------------------
   // 4. API routes
@@ -288,6 +298,13 @@ async function main() {
   await setupScheduler();
 
   console.log(`  - GSA API: ${config.gsaApiKey ? '✓ configured' : '✗ not configured'}`);
+  if (process.env.NODE_ENV === 'production' && config.automatticNetworkCidrs.length === 0) {
+    console.warn(
+      '  - ⚠ AUTOMATTIC_NETWORK_CIDRS is empty: the Automattic-network bypass in ipAllowlistGate/apiTokenGate ' +
+      'is a no-op until VIP Support supplies real CIDR ranges. Do not disable the VIP Dashboard IP Allow List ' +
+      'until this is populated or the gap is consciously accepted — see docs/adr/0001-app-level-access-control.md.'
+    );
+  }
   console.log('✓ Startup complete — all routes active');
 }
 

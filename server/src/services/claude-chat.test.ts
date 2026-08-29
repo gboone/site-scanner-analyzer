@@ -1,6 +1,7 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildContextSection, buildListSitesQuery, type ChatContext } from './claude-chat';
+import { buildContextSection, buildListSitesQuery, callRest, type ChatContext } from './claude-chat';
+import { config } from '../config';
 
 test('buildContextSection embeds the filter summary and total', () => {
   const ctx: ChatContext = {
@@ -102,4 +103,36 @@ test('buildListSitesQuery drops a non-null-mode filter with no value', () => {
     column_filters: [{ field: 'agency', mode: 'contains' }],
   });
   assert.equal(qs, '');
+});
+
+test('callRest attaches an Authorization: Bearer header matching config.scannerApiToken on every call', async () => {
+  config.scannerApiToken = 'test-token-123';
+  const originalFetch = globalThis.fetch;
+  const fetchMock = mock.fn(async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }));
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+  try {
+    await callRest('/sites');
+    assert.equal(fetchMock.mock.calls.length, 1);
+    const [, init] = fetchMock.mock.calls[0].arguments;
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    assert.equal(headers.Authorization, 'Bearer test-token-123');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('callRest preserves caller-supplied headers alongside the Authorization header', async () => {
+  config.scannerApiToken = 'test-token-123';
+  const originalFetch = globalThis.fetch;
+  const fetchMock = mock.fn(async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }));
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+  try {
+    await callRest('/query', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const [, init] = fetchMock.mock.calls[0].arguments;
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    assert.equal(headers['Content-Type'], 'application/json');
+    assert.equal(headers.Authorization, 'Bearer test-token-123');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
