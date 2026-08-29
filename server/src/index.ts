@@ -20,7 +20,7 @@ import schedulerRouter from './routes/scheduler';
 import agentRouter from './routes/agent';
 import { chatRouter, modelsRouter } from './routes/chat';
 import { setupScheduler, shutdown as shutdownScheduler } from './scheduler';
-import { ipAllowlistGate } from './middleware/ipAllowlist';
+import { ipAllowlistGate, findMalformedEntries } from './middleware/ipAllowlist';
 import { apiTokenGate } from './middleware/apiToken';
 
 const app = express();
@@ -298,12 +298,38 @@ async function main() {
   await setupScheduler();
 
   console.log(`  - GSA API: ${config.gsaApiKey ? '✓ configured' : '✗ not configured'}`);
+  // Both access-control gates only enforce when NODE_ENV === 'production' exactly (never touch
+  // this on a mere typo/misconfiguration risk — local dev relies on it being unset). Logging the
+  // resolved value makes a misconfigured production deploy (NODE_ENV unset or misspelled, which
+  // would silently fail-open) visible in startup logs without changing gating behavior.
+  console.log(`  - NODE_ENV: ${process.env.NODE_ENV || '(unset)'}${process.env.NODE_ENV !== 'production' ? ' — access-control gates are BYPASSED' : ''}`);
   if (process.env.NODE_ENV === 'production' && config.automatticNetworkCidrs.length === 0) {
     console.warn(
       '  - ⚠ AUTOMATTIC_NETWORK_CIDRS is empty: the Automattic-network bypass in ipAllowlistGate/apiTokenGate ' +
       'is a no-op until VIP Support supplies real CIDR ranges. Do not disable the VIP Dashboard IP Allow List ' +
       'until this is populated or the gap is consciously accepted — see docs/adr/0001-app-level-access-control.md.'
     );
+  }
+  if (process.env.NODE_ENV === 'production' && config.allowedIps.length === 0) {
+    console.warn(
+      '  - ⚠ ALLOWED_IPS is empty: ipAllowlistGate will 403 every request to the UI/static SPA from every IP. ' +
+      'Set the real allowed-IP list before relying on this in production — see docs/adr/0001-app-level-access-control.md.'
+    );
+  }
+  if (process.env.NODE_ENV === 'production' && !config.scannerApiToken) {
+    console.warn(
+      '  - ⚠ SCANNER_API_TOKEN is empty: apiTokenGate will 401 every /api/v1/* request from outside ALLOWED_IPS, ' +
+      'including this app\'s own in-app Chat feature (claude-chat.ts calls /api/v1/* over loopback with this token). ' +
+      'Set a real token before relying on this in production — see docs/adr/0001-app-level-access-control.md.'
+    );
+  }
+  const malformedAllowedIps = findMalformedEntries(config.allowedIps);
+  const malformedAutomatticCidrs = findMalformedEntries(config.automatticNetworkCidrs);
+  if (malformedAllowedIps.length > 0) {
+    console.warn(`  - ⚠ ALLOWED_IPS has entries that don't parse as an IP/CIDR and will never match: ${malformedAllowedIps.join(', ')}`);
+  }
+  if (malformedAutomatticCidrs.length > 0) {
+    console.warn(`  - ⚠ AUTOMATTIC_NETWORK_CIDRS has entries that don't parse as an IP/CIDR and will never match: ${malformedAutomatticCidrs.join(', ')}`);
   }
   console.log('✓ Startup complete — all routes active');
 }

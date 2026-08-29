@@ -170,6 +170,36 @@ Do this out of order and there's a window with no protection at all, or a
 silent loss of the Automattic-network exception the Dashboard list currently
 provides.
 
+Startup now also warns (does not fail) when `ALLOWED_IPS` or
+`SCANNER_API_TOKEN` is empty in production — both are total-lockout
+conditions (every UI request 403s, or every non-allowlisted `/api/v1/*`
+request 401s, including this app's own in-app Chat feature's loopback
+calls), not just the degraded-Automattic-bypass condition the original
+warning covered.
+
+`/api/v1/health` (the "legacy — keep for existing clients" liveness check) is
+exempted from `apiTokenGate` — a health probe shouldn't require an
+operational secret, and it returns no sensitive data. No other `/api/v1/*`
+route is exempted; `/api/v1/schema` and `/api/v1/settings` remain gated like
+the rest of the API.
+
+## Known, consciously-accepted gaps (surfaced during code review)
+
+- **CSRF-adjacent characteristic of IP-based trust, not new to this change.**
+  The dual-path IP-allow branch trusts network location alone, with no
+  origin/CSRF-token check, for both reads and mutations. This is the same
+  property the Dashboard IP Allow List already had (it's also purely
+  IP-based, edge-level) — this change reproduces that trust model in the
+  app rather than introducing a new exposure. Worth revisiting if the
+  mutation surface under `/api/v1/*` grows, but not addressed here.
+- **In-memory rate limiter is per-process, not distributed.** Fine as long as
+  this app runs as a single VIP instance (confirmed pattern already accepted
+  by `chat.ts`'s existing rate limiter); would need a shared store if this
+  app is ever horizontally scaled.
+- **`chat.ts`'s own inline rate limiter was not migrated** to the new shared
+  `server/src/utils/rateLimit.ts` factory — deliberately out of scope for
+  this change (see the plan's Scope Boundaries), not an oversight.
+
 ## Reusable pattern
 
 This is intended as a reusable pattern for other VIP Node apps with the same

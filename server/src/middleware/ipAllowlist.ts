@@ -40,11 +40,33 @@ export function isIpAllowed(ip: string, allowedCidrs: string[], automatticCidrs:
   return matchesAny(ip, allowedCidrs) || matchesAny(ip, automatticCidrs);
 }
 
+// Returns the entries that don't parse as a bare IP or CIDR range, so a startup
+// check can warn about a typo'd config value instead of it being silently
+// skipped forever inside matchesAny's catch.
+export function findMalformedEntries(entries: string[]): string[] {
+  return entries.filter((entry) => {
+    try {
+      if (entry.includes('/')) {
+        ipaddr.parseCIDR(entry);
+      } else {
+        ipaddr.parse(entry);
+      }
+      return false;
+    } catch {
+      return true;
+    }
+  });
+}
+
+function isUnderPath(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
 // Gates non-API, non-agent routes behind the allowed-IP list. Mounted
 // globally in index.ts, so it must exempt /api/v1 and /agent itself —
 // those paths have their own gate (apiToken.ts) or are deliberately open.
 export function ipAllowlistGate(req: Request, res: Response, next: NextFunction): void {
-  if (req.path.startsWith('/api/v1') || req.path.startsWith('/agent')) {
+  if (isUnderPath(req.path, '/api/v1') || isUnderPath(req.path, '/agent')) {
     next();
     return;
   }

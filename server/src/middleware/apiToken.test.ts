@@ -50,9 +50,12 @@ function mockRes() {
   };
 }
 
-function mockReq(ip: string, authorization?: string) {
+// path defaults to '/sites' -- apiTokenGate is mounted via app.use('/api/v1', apiTokenGate),
+// so req.path here is mount-relative (Express strips '/api/v1'), matching a real request
+// to /api/v1/sites. Pass path explicitly to simulate a different route, e.g. '/health'.
+function mockReq(ip: string, authorization?: string, path: string = '/sites') {
   return {
-    path: '/api/v1/sites',
+    path,
     headers: { 'x-vip-ip': ip, ...(authorization ? { authorization } : {}) },
     socket: { remoteAddress: ip },
   } as any;
@@ -166,6 +169,53 @@ describe('apiTokenGate', () => {
     const next = mock.fn();
     apiTokenGate(req, res as any, next);
     assert.equal(next.mock.calls.length, 1);
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('calls next() unconditionally for /api/v1/health (legacy liveness check), with no token and a disallowed IP', () => {
+    process.env.NODE_ENV = 'production';
+    config.allowedIps = [];
+    config.automatticNetworkCidrs = [];
+    config.scannerApiToken = 'correct-token';
+    const req = mockReq('198.51.100.9', undefined, '/health');
+    const res = mockRes();
+    const next = mock.fn();
+    apiTokenGate(req, res as any, next);
+    assert.equal(next.mock.calls.length, 1);
+    assert.equal(res.statusCode, 200);
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('401s with an empty SCANNER_API_TOKEN in production, for a disallowed IP with no Authorization header', () => {
+    process.env.NODE_ENV = 'production';
+    config.allowedIps = [];
+    config.automatticNetworkCidrs = [];
+    config.scannerApiToken = '';
+    const req = mockReq('198.51.100.10');
+    const res = mockRes();
+    const next = mock.fn();
+    apiTokenGate(req, res as any, next);
+    assert.equal(res.statusCode, 401);
+    assert.equal(next.mock.calls.length, 0);
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('still 429s a correct token once a wrong-token guessing streak has exhausted the rate limit for that IP', () => {
+    process.env.NODE_ENV = 'production';
+    config.allowedIps = [];
+    config.automatticNetworkCidrs = [];
+    config.scannerApiToken = 'correct-token';
+    const ip = '198.51.100.11';
+    for (let i = 0; i < 60; i++) {
+      const req = mockReq(ip, 'Bearer wrong-token');
+      apiTokenGate(req, mockRes() as any, mock.fn());
+    }
+    const req = mockReq(ip, 'Bearer correct-token');
+    const res = mockRes();
+    const next = mock.fn();
+    apiTokenGate(req, res as any, next);
+    assert.equal(res.statusCode, 429);
+    assert.equal(next.mock.calls.length, 0);
     process.env.NODE_ENV = prevNodeEnv;
   });
 });

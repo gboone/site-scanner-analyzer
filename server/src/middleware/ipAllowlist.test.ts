@@ -1,6 +1,7 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { isIpAllowed, ipAllowlistGate, getClientIp } from './ipAllowlist.js';
+import { isIpAllowed, ipAllowlistGate, getClientIp, findMalformedEntries } from './ipAllowlist.js';
+import { config } from '../config.js';
 
 describe('isIpAllowed', () => {
   it('returns true for an IP inside an allowedCidrs entry, false for one outside all entries', () => {
@@ -19,6 +20,22 @@ describe('isIpAllowed', () => {
   it('matches a bare IP entry (no CIDR suffix) as an exact address', () => {
     assert.equal(isIpAllowed('203.0.113.7', ['203.0.113.7'], []), true);
     assert.equal(isIpAllowed('203.0.113.8', ['203.0.113.7'], []), false);
+  });
+
+  it('does not match across IPv4/IPv6 families, and correctly matches within IPv6', () => {
+    assert.equal(isIpAllowed('::1', ['10.0.0.0/8'], []), false);
+    assert.equal(isIpAllowed('2001:db8::1', ['2001:db8::/32'], []), true);
+    assert.equal(isIpAllowed('2001:db9::1', ['2001:db8::/32'], []), false);
+  });
+});
+
+describe('findMalformedEntries', () => {
+  it('returns entries that fail to parse as an IP or CIDR range', () => {
+    assert.deepEqual(findMalformedEntries(['1.2.3.4', 'not-an-ip', '10.0.0.0/8', '10.0.0.0/999']), ['not-an-ip', '10.0.0.0/999']);
+  });
+
+  it('returns an empty array when every entry is valid', () => {
+    assert.deepEqual(findMalformedEntries(['1.2.3.4', '10.0.0.0/8', '2001:db8::/32']), []);
   });
 });
 
@@ -94,12 +111,26 @@ describe('ipAllowlistGate', () => {
 
   it('calls next() unconditionally for a path starting with /api/v1 or /agent, regardless of IP or NODE_ENV', () => {
     process.env.NODE_ENV = 'production';
-    for (const path of ['/api/v1/sites', '/agent/sites']) {
+    for (const path of ['/api/v1', '/api/v1/sites', '/agent', '/agent/sites']) {
       const req = { path, headers: {}, socket: { remoteAddress: '9.9.9.9' } } as any;
       const res = mockRes();
       const next = mock.fn();
       ipAllowlistGate(req, res as any, next);
       assert.equal(next.mock.calls.length, 1, `expected next() for ${path}`);
+    }
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('does NOT exempt a path merely sharing the /api/v1 or /agent string prefix at a different segment boundary', () => {
+    process.env.NODE_ENV = 'production';
+    config.allowedIps = [];
+    for (const path of ['/api/v10/sites', '/agent-admin']) {
+      const req = { path, headers: { 'x-vip-ip': '9.9.9.9' }, socket: { remoteAddress: '9.9.9.9' } } as any;
+      const res = mockRes();
+      const next = mock.fn();
+      ipAllowlistGate(req, res as any, next);
+      assert.equal(res.statusCode, 403, `expected 403 (gated) for ${path}`);
+      assert.equal(next.mock.calls.length, 0, `expected no next() for ${path}`);
     }
     process.env.NODE_ENV = prevNodeEnv;
   });

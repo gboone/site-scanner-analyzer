@@ -34,6 +34,14 @@ function parseBearerToken(header: string | string[] | undefined): string | undef
 // crawler-adjacent internal traffic working unmodified); everyone else needs
 // a valid SCANNER_API_TOKEN, rate-limited by IP. See docs/adr/0001-app-level-access-control.md.
 export function apiTokenGate(req: Request, res: Response, next: NextFunction): void {
+  // Legacy liveness check "kept for existing clients" (see index.ts) — a health
+  // probe shouldn't require an operational secret, and it returns no sensitive data.
+  // req.path here is relative to this middleware's /api/v1 mount point (Express
+  // strips the mount prefix), so '/health' is the full remainder for /api/v1/health.
+  if (req.path === '/health') {
+    next();
+    return;
+  }
   if (process.env.NODE_ENV !== 'production') {
     next();
     return;
