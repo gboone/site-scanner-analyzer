@@ -107,3 +107,53 @@ export async function apiTokenGate(req: Request, res: Response, next: NextFuncti
 
   res.status(401).json({ error: 'invalid_token' });
 }
+
+// Gates /mcp — same credential (SCANNER_API_TOKEN or a valid per-user key) as
+// apiTokenGate, but no IP-allowlist dual path: MCP callers are external Claude
+// Desktop/Code clients, never the in-network SPA, so a token is always required
+// in production. Unlike apiTokenGate's per-user-key path, this isn't scoped to
+// GET — every MCP tool call is a POST carrying a JSON-RPC envelope, but the
+// tools themselves stay read-only internally (see claude-chat.ts's runTool,
+// which always calls the REST API with the server's own SCANNER_API_TOKEN).
+export async function mcpAuthGate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (process.env.NODE_ENV !== 'production') {
+    next();
+    return;
+  }
+
+  res.set('Cache-Control', 'private, no-store');
+  const ip = getClientIp(req);
+
+  if (!checkRateLimit(ip)) {
+    res.status(429).json({ error: 'rate_limited' });
+    return;
+  }
+
+  const token = parseBearerToken(req.headers.authorization);
+  if (isValidToken(token, config.scannerApiToken)) {
+    next();
+    return;
+  }
+
+  if (token) {
+    try {
+      const hash = hashToken(token);
+      const rows = await query<{ id: number; revoked_at: string | null }>(
+        'SELECT id, revoked_at FROM api_keys WHERE token_hash = :hash',
+        { hash }
+      );
+      if (isValidKeyRow(rows[0])) {
+        execute(
+          "UPDATE api_keys SET last_used_at = DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ') WHERE id = :id",
+          { id: rows[0].id }
+        ).catch((err) => console.error('[api_keys] last_used_at update failed:', err));
+        next();
+        return;
+      }
+    } catch {
+      // fall through to 401 — a DB error must never bypass the fail-closed default
+    }
+  }
+
+  res.status(401).json({ error: 'invalid_token' });
+}

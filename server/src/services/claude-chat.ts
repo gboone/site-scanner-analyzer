@@ -63,7 +63,9 @@ run_sql accepts SELECT statements only. Always add a LIMIT for exploratory queri
 
 When a user names an agency by acronym or nickname (e.g. "VA", "the FBI", "NOAA"), call resolve_agency first to get the exact stored name, then use it. Be concise, lead with the answer, and cite concrete numbers from the tools rather than guessing.`;
 
-const TOOLS: Anthropic.Tool[] = [
+// Exported so the MCP server (server/src/mcp/server.ts) can register the same
+// tools/dispatch without a second copy of the schemas or REST-calling logic.
+export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'resolve_agency',
     description:
@@ -276,7 +278,7 @@ export async function callRest(path: string, init?: RequestInit): Promise<string
   }
 }
 
-async function runTool(name: string, input: any): Promise<string> {
+export async function runTool(name: string, input: any): Promise<string> {
   switch (name) {
     case 'resolve_agency':
       return callRest(`/agencies/resolve?q=${encodeURIComponent(String(input?.q ?? ''))}`);

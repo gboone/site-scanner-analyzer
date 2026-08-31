@@ -20,10 +20,11 @@ import schedulerRouter from './routes/scheduler';
 import agentRouter from './routes/agent';
 import { chatRouter, modelsRouter } from './routes/chat';
 import { apiKeysRouter } from './routes/api-keys';
+import { mcpRouter } from './mcp/server';
 import { setupScheduler, shutdown as shutdownScheduler } from './scheduler';
 import { buildSchemaResponse } from './apiRegistry';
 import { ipAllowlistGate, findMalformedEntries } from './middleware/ipAllowlist';
-import { apiTokenGate } from './middleware/apiToken';
+import { apiTokenGate, mcpAuthGate } from './middleware/apiToken';
 
 const app = express();
 
@@ -162,6 +163,7 @@ async function main() {
   app.use('/api/v1/models',         modelsRouter);
   app.use('/api/v1/api-keys',       apiKeysRouter);
   app.use('/agent',                 agentRouter);
+  app.use('/mcp',                   mcpAuthGate, mcpRouter);
 
   // Settings endpoint (simple key/value store)
   app.get('/api/v1/settings', async (_req, res) => {

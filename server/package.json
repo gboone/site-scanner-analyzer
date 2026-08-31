@@ -4,13 +4,14 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "test": "npx tsx --test src/config.test.ts src/utils/sanitize.test.ts src/utils/publicFilter.test.ts src/utils/rateLimit.test.ts src/utils/apiKeys.test.ts src/middleware/ssrf-protection.test.ts src/middleware/ipAllowlist.test.ts src/middleware/apiToken.test.ts src/routes/agencies.test.ts src/services/claude-chat.test.ts src/apiRegistry.test.ts src/apiMeta.test.ts",
+    "test": "npx tsx --test src/config.test.ts src/utils/sanitize.test.ts src/utils/publicFilter.test.ts src/utils/rateLimit.test.ts src/utils/apiKeys.test.ts src/middleware/ssrf-protection.test.ts src/middleware/ipAllowlist.test.ts src/middleware/apiToken.test.ts src/routes/agencies.test.ts src/services/claude-chat.test.ts src/apiRegistry.test.ts src/apiMeta.test.ts src/mcp/server.test.ts",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@xmldom/xmldom": "^0.8.11",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.0",

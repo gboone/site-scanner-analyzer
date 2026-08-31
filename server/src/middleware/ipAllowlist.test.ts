@@ -126,9 +126,9 @@ describe('ipAllowlistGate', () => {
     process.env.NODE_ENV = prevNodeEnv;
   });
 
-  it('calls next() unconditionally for a path starting with /api/v1 or /agent, regardless of IP or NODE_ENV', () => {
+  it('calls next() unconditionally for a path starting with /api/v1, /agent, or /mcp, regardless of IP or NODE_ENV', () => {
     process.env.NODE_ENV = 'production';
-    for (const path of ['/api/v1', '/api/v1/sites', '/agent', '/agent/sites']) {
+    for (const path of ['/api/v1', '/api/v1/sites', '/agent', '/agent/sites', '/mcp']) {
       const req = { path, headers: {}, socket: { remoteAddress: '9.9.9.9' } } as any;
       const res = mockRes();
       const next = mock.fn();
@@ -148,10 +148,10 @@ describe('ipAllowlistGate', () => {
     process.env.NODE_ENV = prevNodeEnv;
   });
 
-  it('does NOT exempt a path merely sharing the /api/v1 or /agent string prefix at a different segment boundary', () => {
+  it('does NOT exempt a path merely sharing the /api/v1, /agent, or /mcp string prefix at a different segment boundary', () => {
     process.env.NODE_ENV = 'production';
     config.allowedIps = [];
-    for (const path of ['/api/v10/sites', '/agent-admin']) {
+    for (const path of ['/api/v10/sites', '/agent-admin', '/mcp-admin']) {
       const req = { path, headers: { 'x-vip-ip': '9.9.9.9' }, socket: { remoteAddress: '9.9.9.9' } } as any;
       const res = mockRes();
       const next = mock.fn();

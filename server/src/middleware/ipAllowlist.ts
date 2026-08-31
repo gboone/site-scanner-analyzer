@@ -75,11 +75,13 @@ export function isUnderPath(path: string, prefix: string): boolean {
   return normalizedPath === normalizedPrefix || normalizedPath.startsWith(`${normalizedPrefix}/`);
 }
 
-// Gates non-API, non-agent routes behind the allowed-IP list. Mounted
-// globally in index.ts, so it must exempt /api/v1 and /agent itself —
-// those paths have their own gate (apiToken.ts) or are deliberately open.
+// Gates non-API, non-agent, non-mcp routes behind the allowed-IP list. Mounted
+// globally in index.ts, so it must exempt /api/v1, /agent, and /mcp themselves —
+// those paths have their own gate (apiToken.ts) or are deliberately open. /mcp
+// in particular is called by external Claude Desktop/Code clients that will
+// never be on an allowed IP, so it must rely solely on its own token gate.
 export function ipAllowlistGate(req: Request, res: Response, next: NextFunction): void {
-  if (isUnderPath(req.path, '/api/v1') || isUnderPath(req.path, '/agent')) {
+  if (isUnderPath(req.path, '/api/v1') || isUnderPath(req.path, '/agent') || isUnderPath(req.path, '/mcp')) {
     next();
     return;
   }

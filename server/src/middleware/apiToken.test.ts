@@ -1,6 +1,6 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { isValidToken, isValidKeyRow, apiTokenGate } from './apiToken.js';
+import { isValidToken, isValidKeyRow, apiTokenGate, mcpAuthGate } from './apiToken.js';
 import { config } from '../config.js';
 
 describe('isValidKeyRow', () => {
@@ -315,6 +315,89 @@ describe('apiTokenGate', () => {
     await apiTokenGate(req, res as any, next);
     assert.equal(res.statusCode, 401);
     assert.equal(next.mock.calls.length, 0);
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+});
+
+describe('mcpAuthGate', () => {
+  const prevNodeEnv = process.env.NODE_ENV;
+
+  it('401s with no Authorization header', async () => {
+    process.env.NODE_ENV = 'production';
+    config.scannerApiToken = 'correct-token';
+    const req = mockReq('198.51.100.30', undefined, '/', 'POST');
+    const res = mockRes();
+    const next = mock.fn();
+    await mcpAuthGate(req, res as any, next);
+    assert.equal(res.statusCode, 401);
+    assert.equal(next.mock.calls.length, 0);
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('401s with a well-formed but wrong bearer token', async () => {
+    process.env.NODE_ENV = 'production';
+    config.scannerApiToken = 'correct-token';
+    const req = mockReq('198.51.100.31', 'Bearer wrong-token', '/', 'POST');
+    const res = mockRes();
+    const next = mock.fn();
+    await mcpAuthGate(req, res as any, next);
+    assert.equal(res.statusCode, 401);
+    assert.equal(next.mock.calls.length, 0);
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('calls next() with the correct SCANNER_API_TOKEN', async () => {
+    process.env.NODE_ENV = 'production';
+    config.scannerApiToken = 'correct-token';
+    const req = mockReq('198.51.100.32', 'Bearer correct-token', '/', 'POST');
+    const res = mockRes();
+    const next = mock.fn();
+    await mcpAuthGate(req, res as any, next);
+    assert.equal(next.mock.calls.length, 1);
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('401s even from an IP in ALLOWED_IPS with no token — unlike apiTokenGate, there is no IP-allow dual path', async () => {
+    process.env.NODE_ENV = 'production';
+    config.allowedIps = ['198.51.100.33'];
+    config.automatticNetworkCidrs = [];
+    config.scannerApiToken = 'correct-token';
+    const req = mockReq('198.51.100.33', undefined, '/', 'POST');
+    const res = mockRes();
+    const next = mock.fn();
+    await mcpAuthGate(req, res as any, next);
+    assert.equal(res.statusCode, 401);
+    assert.equal(next.mock.calls.length, 0);
+    config.allowedIps = [];
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('429s once the rate limit is exceeded for that IP', async () => {
+    process.env.NODE_ENV = 'production';
+    config.allowedIps = [];
+    config.automatticNetworkCidrs = [];
+    config.scannerApiToken = 'correct-token';
+    const ip = '198.51.100.34';
+    let last429 = false;
+    for (let i = 0; i < 61; i++) {
+      const req = mockReq(ip, 'Bearer wrong-token', '/', 'POST');
+      const res = mockRes();
+      const next = mock.fn();
+      await mcpAuthGate(req, res as any, next);
+      last429 = res.statusCode === 429;
+    }
+    assert.equal(last429, true);
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('calls next() unconditionally when NODE_ENV !== production, regardless of Authorization', async () => {
+    process.env.NODE_ENV = 'development';
+    config.scannerApiToken = '';
+    const req = mockReq('198.51.100.35', undefined, '/', 'POST');
+    const res = mockRes();
+    const next = mock.fn();
+    await mcpAuthGate(req, res as any, next);
+    assert.equal(next.mock.calls.length, 1);
     process.env.NODE_ENV = prevNodeEnv;
   });
 });
