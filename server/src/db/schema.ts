@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, text, int, double, index } from 'drizzle-orm/mysql-core';
+import { mysqlTable, varchar, text, int, double, index, uniqueIndex } from 'drizzle-orm/mysql-core';
 import { sql } from 'drizzle-orm';
 
 const TS_DEFAULT = sql`(DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ'))`;
@@ -204,5 +204,5 @@ export const api_keys = mysqlTable('api_keys', {
   revoked_at: text('revoked_at'),
   revoked_ip: varchar('revoked_ip', { length: 45 }),
 }, (table) => ({
-  tokenHashIdx: index('idx_api_keys_token_hash').on(table.token_hash),
+  tokenHashIdx: uniqueIndex('idx_api_keys_token_hash').on(table.token_hash),
 }));

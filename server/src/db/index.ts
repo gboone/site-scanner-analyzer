@@ -375,7 +375,15 @@ export async function initDb(): Promise<void> {
       revoked_ip VARCHAR(45)
     )
   `);
-  await createIndex('idx_api_keys_token_hash', 'api_keys', 'token_hash');
+  // Unique (not just createIndex's plain index): a single hash should map to at
+  // most one live key, and enforcing it in the DB costs nothing given a
+  // 256-bit random token — createIndex() has no unique-index option, so this
+  // is issued directly rather than widening that helper for one call site.
+  try {
+    await pool.query('CREATE UNIQUE INDEX `idx_api_keys_token_hash` ON `api_keys`(`token_hash`)');
+  } catch (err: any) {
+    if (err.errno !== 1061) throw err; // 1061 = ER_DUP_KEYNAME: index already exists
+  }
 
   // ADD COLUMN IF NOT EXISTS — columns introduced by GSA importer or client-side scanner
   await addCol('https', 'INTEGER');

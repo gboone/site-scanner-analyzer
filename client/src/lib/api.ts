@@ -187,7 +187,7 @@ export const api = {
   // Self-service per-user API keys
   listApiKeys: () => request<{ data: ApiKey[]; meta: ApiMeta }>('/api-keys'),
   createApiKey: (label: string, owner_email: string) =>
-    request<{ id: number; label: string; owner_email: string; created_at: string; token: string }>('/api-keys', {
+    request<{ id: number; label: string; owner_email: string; created_at: string | null; token: string }>('/api-keys', {
       method: 'POST',
       body: JSON.stringify({ label, owner_email }),
     }),

@@ -59,8 +59,20 @@ export function findMalformedEntries(entries: string[]): string[] {
 }
 
 // Exported for reuse by apiToken.ts's per-user-key route scoping.
+//
+// Case-insensitive on purpose: Express's own route matching is case-insensitive
+// by default (no `case sensitive routing` setting is set anywhere in this app),
+// so `GET /api/v1/SETTINGS` still resolves to the real /api/v1/settings handler
+// even though req.path preserves the caller's original casing. A case-sensitive
+// prefix check here would let a differently-cased path slip past both this
+// function's callers (ipAllowlistGate's /api/v1 exemption and apiTokenGate's
+// per-user-key /settings and /api-keys exclusion) while Express still routes it
+// to the real handler underneath — reopening exactly the privilege-escalation
+// gap the per-user-key scoping exists to close. Confirmed via code review.
 export function isUnderPath(path: string, prefix: string): boolean {
-  return path === prefix || path.startsWith(`${prefix}/`);
+  const normalizedPath = path.toLowerCase();
+  const normalizedPrefix = prefix.toLowerCase();
+  return normalizedPath === normalizedPrefix || normalizedPath.startsWith(`${normalizedPrefix}/`);
 }
 
 // Gates non-API, non-agent routes behind the allowed-IP list. Mounted

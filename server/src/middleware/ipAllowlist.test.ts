@@ -1,7 +1,24 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { isIpAllowed, ipAllowlistGate, getClientIp, findMalformedEntries } from './ipAllowlist.js';
+import { isIpAllowed, ipAllowlistGate, getClientIp, findMalformedEntries, isUnderPath } from './ipAllowlist.js';
 import { config } from '../config.js';
+
+describe('isUnderPath', () => {
+  it('matches an exact prefix and a prefix followed by a sub-path', () => {
+    assert.equal(isUnderPath('/settings', '/settings'), true);
+    assert.equal(isUnderPath('/settings/foo', '/settings'), true);
+  });
+
+  it('does not match a different string merely sharing the prefix at a non-segment boundary', () => {
+    assert.equal(isUnderPath('/settings-admin', '/settings'), false);
+  });
+
+  it('is case-insensitive, matching Express\'s own case-insensitive route resolution', () => {
+    assert.equal(isUnderPath('/SETTINGS', '/settings'), true);
+    assert.equal(isUnderPath('/Api-Keys/5', '/api-keys'), true);
+    assert.equal(isUnderPath('/settings', '/SETTINGS'), true);
+  });
+});
 
 describe('isIpAllowed', () => {
   it('returns true for an IP inside an allowedCidrs entry, false for one outside all entries', () => {
@@ -118,6 +135,16 @@ describe('ipAllowlistGate', () => {
       ipAllowlistGate(req, res as any, next);
       assert.equal(next.mock.calls.length, 1, `expected next() for ${path}`);
     }
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
+  it('exempts a differently-cased /api/v1 path, matching Express\'s own case-insensitive routing', () => {
+    process.env.NODE_ENV = 'production';
+    const req = { path: '/API/v1/SITES', headers: {}, socket: { remoteAddress: '9.9.9.9' } } as any;
+    const res = mockRes();
+    const next = mock.fn();
+    ipAllowlistGate(req, res as any, next);
+    assert.equal(next.mock.calls.length, 1);
     process.env.NODE_ENV = prevNodeEnv;
   });
 

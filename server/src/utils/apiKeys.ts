@@ -12,8 +12,12 @@ export function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
-/** True only for an @a8c.com / @automattic.com address (case-insensitive). Domain shape only — not ownership-verified. */
+const MAX_OWNER_EMAIL_LENGTH = 254; // RFC 5321 practical max for a full email address
+
+/** True only for a well-formed @a8c.com / @automattic.com address (case-insensitive). Domain shape only — not ownership-verified. */
 export function isAllowedOwnerEmail(email: string): boolean {
   const normalized = email.trim().toLowerCase();
+  if (!normalized || normalized.length > MAX_OWNER_EMAIL_LENGTH) return false;
+  if (normalized.split('@').length !== 2) return false; // reject zero or multiple '@' (e.g. "x@evil.com@a8c.com")
   return ALLOWED_OWNER_DOMAINS.some((domain) => normalized.endsWith(`@${domain}`));
 }

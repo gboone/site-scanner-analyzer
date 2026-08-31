@@ -92,6 +92,7 @@ Special routes: `/api/v1/settings`, `/api/v1/schema`, `/api/v1/health`, and `/he
 - **`briefings`** — Generated agency/bureau briefings
 - **`scan_sessions`** — Bulk scan tracking (progress, status, error logs); reused by scheduler
 - **`settings`** — Key-value runtime config (API keys, endpoints, scheduler settings)
+- **`api_keys`** — Self-service per-user API keys (label, owner email, hashed token, created/revoked timestamps + IPs); accepted by `apiTokenGate` alongside `SCANNER_API_TOKEN`, scoped to `GET` requests only
 
 The `is_public` column is auto-refreshed at startup and after GSA imports via `refreshIsPublic()`. `PUBLIC_ONLY_CONDITION` (in `publicFilter.ts`) is the canonical SQL filter for excluding staging, VPN-gated, internal, and non-200 sites — 97 test cases cover its logic.
 

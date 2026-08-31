@@ -96,7 +96,7 @@ export async function apiTokenGate(req: Request, res: Response, next: NextFuncti
         execute(
           "UPDATE api_keys SET last_used_at = DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%SZ') WHERE id = :id",
           { id: rows[0].id }
-        ).catch(() => {});
+        ).catch((err) => console.error('[api_keys] last_used_at update failed:', err));
         next();
         return;
       }

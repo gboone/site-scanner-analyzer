@@ -48,4 +48,13 @@ describe('isAllowedOwnerEmail', () => {
     assert.equal(isAllowedOwnerEmail('a8c.com'), false);
     assert.equal(isAllowedOwnerEmail(''), false);
   });
+
+  it('rejects an address with more than one "@" even if it ends with an allowed domain', () => {
+    assert.equal(isAllowedOwnerEmail('attacker@evil.com@a8c.com'), false);
+  });
+
+  it('rejects an address longer than 254 characters', () => {
+    const longLocalPart = 'a'.repeat(250);
+    assert.equal(isAllowedOwnerEmail(`${longLocalPart}@a8c.com`), false);
+  });
 });

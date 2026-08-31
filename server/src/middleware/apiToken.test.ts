@@ -288,6 +288,22 @@ describe('apiTokenGate', () => {
     process.env.NODE_ENV = prevNodeEnv;
   });
 
+  it('401s a differently-cased /SETTINGS or /Api-Keys request even with a well-formed bearer token (regression: Express routes case-insensitively, so the scope check must too)', async () => {
+    process.env.NODE_ENV = 'production';
+    config.allowedIps = [];
+    config.automatticNetworkCidrs = [];
+    config.scannerApiToken = 'correct-token';
+    for (const path of ['/SETTINGS', '/Api-Keys']) {
+      const req = mockReq('198.51.100.15', 'Bearer some-per-user-key', path, 'GET');
+      const res = mockRes();
+      const next = mock.fn();
+      await apiTokenGate(req, res as any, next);
+      assert.equal(res.statusCode, 401, `expected 401 for ${path}`);
+      assert.equal(next.mock.calls.length, 0, `expected no next() for ${path}`);
+    }
+    process.env.NODE_ENV = prevNodeEnv;
+  });
+
   it('401s a non-GET request (e.g. POST /query) even with a well-formed bearer token (excluded from per-user-key scope)', async () => {
     process.env.NODE_ENV = 'production';
     config.allowedIps = [];
