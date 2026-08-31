@@ -362,6 +362,21 @@ export async function initDb(): Promise<void> {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      label VARCHAR(255) NOT NULL,
+      owner_email VARCHAR(255) NOT NULL,
+      token_hash VARCHAR(64) NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (${TS_DEFAULT}),
+      created_ip VARCHAR(45),
+      last_used_at TEXT,
+      revoked_at TEXT,
+      revoked_ip VARCHAR(45)
+    )
+  `);
+  await createIndex('idx_api_keys_token_hash', 'api_keys', 'token_hash');
+
   // ADD COLUMN IF NOT EXISTS — columns introduced by GSA importer or client-side scanner
   await addCol('https', 'INTEGER');
   await addCol('http_status_code', 'INTEGER');

@@ -354,6 +354,15 @@ export interface Briefing {
   duration_ms: number | null;
 }
 
+export interface ApiKey {
+  id: number;
+  label: string;
+  owner_email: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
 // ─── API response types ────────────────────────────────────────────────────
 
 /**

@@ -192,3 +192,17 @@ export const settings = mysqlTable('settings', {
   value: text('value'),
   updated_at: text('updated_at').notNull().default(TS_DEFAULT),
 });
+
+export const api_keys = mysqlTable('api_keys', {
+  id: int('id').primaryKey().autoincrement(),
+  label: varchar('label', { length: 255 }).notNull(),
+  owner_email: varchar('owner_email', { length: 255 }).notNull(),
+  token_hash: varchar('token_hash', { length: 64 }).notNull(),
+  created_at: text('created_at').notNull().default(TS_DEFAULT),
+  created_ip: varchar('created_ip', { length: 45 }),
+  last_used_at: text('last_used_at'),
+  revoked_at: text('revoked_at'),
+  revoked_ip: varchar('revoked_ip', { length: 45 }),
+}, (table) => ({
+  tokenHashIdx: index('idx_api_keys_token_hash').on(table.token_hash),
+}));
