@@ -222,7 +222,10 @@ export default function ExplorerView({ onNavigate }: Props) {
   // get.gov jurisdiction / location filters
   const [domainTypeFilter, setDomainTypeFilter] = React.useState(initial.domainTypeFilter);
   const [stateFilter, setStateFilter] = React.useState(initial.stateFilter);
-  const { data: domainTypes = [] } = useQuery({ queryKey: ['domain-types'], queryFn: () => api.getDomainTypes() });
+  const { data: domainTypes = [] } = useQuery({
+    queryKey: ['domain-types'],
+    queryFn: () => api.getDomainTypes().then((r) => r.data),
+  });
 
   // Column-level filters: { [field]: { value, mode } }
   type ColFilterEntry = { value: string; mode: string };

@@ -5,7 +5,7 @@ import type { PaginatedResponse } from 'shared';
 export function useScanSessions() {
   return useQuery({
     queryKey: ['scan-sessions'],
-    queryFn: () => api.getScanSessions() as any,
+    queryFn: () => api.getScanSessions().then((r) => r.data) as any,
     staleTime: 1000 * 10, // 10 seconds — stay reasonably fresh while visible
   });
 }

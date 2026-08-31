@@ -356,12 +356,24 @@ export interface Briefing {
 
 // ─── API response types ────────────────────────────────────────────────────
 
+/**
+ * Static navigation hint attached to API responses: what endpoint you just
+ * called, and which sibling endpoints are worth exploring next. `related` is
+ * a fixed per-route-family list (from server/src/apiRegistry.ts), not built
+ * from the response payload.
+ */
+export interface ApiMeta {
+  self: { method: string; path: string; description: string };
+  related: Array<{ method: string; path: string; description: string }>;
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   total: number;
   page: number;
   limit: number;
   pages: number;
+  meta?: ApiMeta;
 }
 
 export interface StatsResponse {
@@ -391,6 +403,7 @@ export interface StatsResponse {
     cls: { good: number; needs_improvement: number; poor: number; no_data: number };
   };
   eol_risk_count: number;
+  meta?: ApiMeta;
 }
 
 export interface ImportResult {
@@ -403,4 +416,5 @@ export interface QueryResult {
   rows: Record<string, unknown>[];
   count: number;
   duration_ms: number;
+  meta?: ApiMeta;
 }

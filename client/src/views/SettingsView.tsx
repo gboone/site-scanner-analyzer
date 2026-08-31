@@ -243,7 +243,10 @@ export default function SettingsView() {
   // Claude chat settings — API key + model dropdown (populated from the Models API)
   const { data: models = [] } = useQuery({
     queryKey: ['models'],
-    queryFn: () => api.listModels().catch(() => [] as { id: string; display_name: string }[]),
+    queryFn: () =>
+      api.listModels()
+        .then((r) => r.data)
+        .catch(() => [] as { id: string; display_name: string }[]),
     enabled: !!s.ANTHROPIC_API_KEY,
   });
 

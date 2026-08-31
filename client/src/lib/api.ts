@@ -1,3 +1,5 @@
+import type { ApiMeta } from 'shared';
+
 const BASE = '/api/v1';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -35,7 +37,8 @@ export const api = {
   getScans: (domain: string) => request(`/scans/${encodeURIComponent(domain)}`),
   postScan: (domain: string, scan_result: unknown, diff_summary?: unknown) =>
     request('/scans', { method: 'POST', body: JSON.stringify({ domain, scan_result, diff_summary }) }),
-  getBriefings: (domain: string) => request(`/briefings/${encodeURIComponent(domain)}`),
+  getBriefings: (domain: string) =>
+    request<{ data: Record<string, unknown>[]; meta: ApiMeta }>(`/briefings/${encodeURIComponent(domain)}`),
   createBriefing: (domain: string, provider: string, scope?: string) =>
     request('/briefings', { method: 'POST', body: JSON.stringify({ domain, provider, scope }) }),
   exportBriefing: (id: number) => `${BASE}/briefings/export/${id}`,
@@ -79,11 +82,11 @@ export const api = {
     return result;
   },
   getAgencySuggestions: (q: string) =>
-    request<{ value: string; count: number }[]>(`/agencies?q=${encodeURIComponent(q)}`),
+    request<{ data: { value: string; count: number }[]; meta: ApiMeta }>(`/agencies?q=${encodeURIComponent(q)}`),
   getBureauSuggestions: (q: string, agency?: string) => {
     const params = new URLSearchParams({ q });
     if (agency) params.set('agency', agency);
-    return request<{ value: string; count: number }[]>(`/bureaus?${params}`);
+    return request<{ data: { value: string; count: number }[]; meta: ApiMeta }>(`/bureaus?${params}`);
   },
   testGSA: () => request('/gsa/test'),
   getSettings: () => request<Record<string, string>>('/settings'),
@@ -91,7 +94,7 @@ export const api = {
     request(`/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
 
   // Claude chat over the site data
-  listModels: () => request<{ id: string; display_name: string }[]>('/models'),
+  listModels: () => request<{ data: { id: string; display_name: string }[]; meta: ApiMeta }>('/models'),
   chat: (
     messages: { role: 'user' | 'assistant'; content: string }[],
     context?: object
@@ -109,7 +112,7 @@ export const api = {
   health: () => request('/health'),
 
   // Scan sessions — persists bulk-scan progress across page loads
-  getScanSessions: () => request<Record<string, unknown>[]>('/scan-sessions'),
+  getScanSessions: () => request<{ data: Record<string, unknown>[]; meta: ApiMeta }>('/scan-sessions'),
   createScanSession: (total_domains: number, label?: string) =>
     request<{ id: number }>('/scan-sessions', {
       method: 'POST',
@@ -157,7 +160,7 @@ export const api = {
     return result;
   },
   testGetGov: () => request('/getgov/test'),
-  getDomainTypes: () => request<string[]>('/sites/domain-types'),
+  getDomainTypes: () => request<{ data: string[]; meta: ApiMeta }>('/sites/domain-types'),
 
   // Scheduler — configured scheduled background jobs
   getSchedulerStatus: () => request<{

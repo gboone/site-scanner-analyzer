@@ -109,7 +109,7 @@ export default function AgencyBureauFilter({
     if (agencyTimer.current) clearTimeout(agencyTimer.current);
     agencyTimer.current = setTimeout(async () => {
       try {
-        const results = await api.getAgencySuggestions(q);
+        const { data: results } = await api.getAgencySuggestions(q);
         setAgencySuggestions(results);
         setAgencyActiveIndex(-1);
       } catch {
@@ -122,7 +122,7 @@ export default function AgencyBureauFilter({
     if (bureauTimer.current) clearTimeout(bureauTimer.current);
     bureauTimer.current = setTimeout(async () => {
       try {
-        const results = await api.getBureauSuggestions(q, scopedAgency || undefined);
+        const { data: results } = await api.getBureauSuggestions(q, scopedAgency || undefined);
         setBureauSuggestions(results);
         setBureauActiveIndex(-1);
       } catch {
