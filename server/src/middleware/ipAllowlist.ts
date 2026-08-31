@@ -58,7 +58,8 @@ export function findMalformedEntries(entries: string[]): string[] {
   });
 }
 
-function isUnderPath(path: string, prefix: string): boolean {
+// Exported for reuse by apiToken.ts's per-user-key route scoping.
+export function isUnderPath(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
 
