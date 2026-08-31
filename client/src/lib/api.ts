@@ -1,4 +1,4 @@
-import type { ApiMeta } from 'shared';
+import type { ApiMeta, ApiKey } from 'shared';
 
 const BASE = '/api/v1';
 
@@ -11,6 +11,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error((err as any).error || `HTTP ${res.status}`);
   }
+  if (res.status === 204) return undefined as T; // e.g. DELETE /api-keys/:id — no body to parse
   return res.json();
 }
 
@@ -182,4 +183,13 @@ export const api = {
     request('/scheduler/scan/stop', { method: 'POST' }),
   triggerGetGovRefresh: () =>
     request('/scheduler/getgov/run', { method: 'POST' }),
+
+  // Self-service per-user API keys
+  listApiKeys: () => request<{ data: ApiKey[]; meta: ApiMeta }>('/api-keys'),
+  createApiKey: (label: string, owner_email: string) =>
+    request<{ id: number; label: string; owner_email: string; created_at: string; token: string }>('/api-keys', {
+      method: 'POST',
+      body: JSON.stringify({ label, owner_email }),
+    }),
+  revokeApiKey: (id: number) => request<void>(`/api-keys/${id}`, { method: 'DELETE' }),
 };

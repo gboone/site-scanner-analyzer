@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import ApiKeysSection from '../components/settings/ApiKeysSection';
 
 function SettingField({
   label,
@@ -620,6 +621,8 @@ export default function SettingsView() {
           </button>
         </div>
       </div>
+
+      <ApiKeysSection />
       </div>
     </div>
   );
