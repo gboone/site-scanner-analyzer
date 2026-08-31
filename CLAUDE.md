@@ -52,6 +52,8 @@ The `shared/` workspace exports TypeScript interfaces used by both server and cl
 | `server/src/routes/` | 13 route modules mounted at `/api/v1/` (see below) |
 | `server/src/utils/sanitize.ts` | Prompt injection prevention (`sanitizeSingleLine`, `sanitizeMultiLine`, `encodeForPrompt`) |
 | `server/src/utils/publicFilter.ts` | `PUBLIC_ONLY_CONDITION` SQL WHERE clause for excluding non-public sites |
+| `server/src/utils/apiKeys.ts` | Per-user API key helpers: `generateApiKeyToken`, `hashToken`, `isAllowedOwnerEmail` |
+| `server/src/routes/api-keys.ts` | Self-service per-user API key CRUD (`/api/v1/api-keys`) |
 | `server/src/scheduler.ts` | node-cron jobs for GSA refresh + site rescan |
 | `server/src/middleware/ssrf-protection.ts` | Blocks private IPs/localhost before any outbound fetch |
 | `client/src/contexts/ScanQueueContext.tsx` | Global state for bulk scan progress |
