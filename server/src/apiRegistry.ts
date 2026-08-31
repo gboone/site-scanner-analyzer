@@ -15,7 +15,7 @@ function readPackageVersion(): string {
   }
 }
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH';
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface RouteParam {
   type: string;
@@ -417,6 +417,33 @@ export const API_REGISTRY = {
     description: 'Claude models the configured ANTHROPIC_API_KEY can access.',
     category: 'chat',
     related: ['chat.send'],
+  },
+
+  // --- api-keys ---------------------------------------------------------
+  'apiKeys.list': {
+    method: 'GET',
+    path: '/api/v1/api-keys',
+    description: 'List self-service per-user API keys (label, owner email, timestamps — never the secret).',
+    category: 'api-keys',
+    related: ['apiKeys.create', 'apiKeys.revoke'],
+  },
+  'apiKeys.create': {
+    method: 'POST',
+    path: '/api/v1/api-keys',
+    description: 'Mint a new per-user API key. The raw token is returned exactly once, in this response only.',
+    category: 'api-keys',
+    parameters: {
+      label: { type: 'string', required: true, description: 'Free-text label for the key.' },
+      owner_email: { type: 'string', required: true, description: 'Must be an @a8c.com or @automattic.com address.' },
+    },
+    related: ['apiKeys.list', 'apiKeys.revoke'],
+  },
+  'apiKeys.revoke': {
+    method: 'DELETE',
+    path: '/api/v1/api-keys/:id',
+    description: 'Revoke a per-user API key. Idempotent — revoking an already-revoked key still succeeds.',
+    category: 'api-keys',
+    related: ['apiKeys.list', 'apiKeys.create'],
   },
 } as const satisfies Record<string, RouteEntry>;
 

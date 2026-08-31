@@ -19,6 +19,7 @@ import reportRouter from './routes/report';
 import schedulerRouter from './routes/scheduler';
 import agentRouter from './routes/agent';
 import { chatRouter, modelsRouter } from './routes/chat';
+import { apiKeysRouter } from './routes/api-keys';
 import { setupScheduler, shutdown as shutdownScheduler } from './scheduler';
 import { buildSchemaResponse } from './apiRegistry';
 import { ipAllowlistGate, findMalformedEntries } from './middleware/ipAllowlist';
@@ -159,6 +160,7 @@ async function main() {
   app.use('/api/v1/scheduler',      schedulerRouter);
   app.use('/api/v1/chat',           chatRouter);
   app.use('/api/v1/models',         modelsRouter);
+  app.use('/api/v1/api-keys',       apiKeysRouter);
   app.use('/agent',                 agentRouter);
 
   // Settings endpoint (simple key/value store)
