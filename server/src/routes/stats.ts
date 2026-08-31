@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
+import { metaFor } from '../apiMeta';
 
 const router = Router();
 
@@ -180,6 +181,7 @@ router.get('/', async (req: Request, res: Response) => {
       cls: { good: Number(cls.good), needs_improvement: Number(cls.needs_improvement), poor: Number(cls.poor), no_data: Number(cls.no_data) },
     },
     eol_risk_count: Number(eol_risk_count),
+    meta: metaFor('stats.get'),
   });
   } catch (err: any) {
     console.error('[stats] GET / error:', err.message, '\n', err.stack);

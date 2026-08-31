@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db';
+import { metaFor } from '../apiMeta';
 
 const router = Router();
 
@@ -32,7 +33,7 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const [rows] = await client.query(trimmed);
     const duration_ms = Date.now() - start;
-    res.json({ rows, count: (rows as any[]).length, duration_ms });
+    res.json({ rows, count: (rows as any[]).length, duration_ms, meta: metaFor('query.run') });
   } catch (err: any) {
     console.error('[query] SQL error:', err.message);
     res.status(400).json({ error: 'Query failed. Check your SQL syntax and try again.' });

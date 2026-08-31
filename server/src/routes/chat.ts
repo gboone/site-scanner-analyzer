@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { chat, listModels, type ChatMessage, type ChatContext } from '../services/claude-chat';
+import { metaFor } from '../apiMeta';
 
 export const chatRouter = Router();
 export const modelsRouter = Router();
@@ -62,7 +63,7 @@ chatRouter.post('/', async (req: Request, res: Response) => {
 // GET /api/v1/models — models the configured key can access
 modelsRouter.get('/', async (_req: Request, res: Response) => {
   try {
-    res.json(await listModels());
+    res.json({ data: await listModels(), meta: metaFor('models.list') });
   } catch (err: any) {
     const status = typeof err?.status === 'number' ? err.status : 500;
     res.status(status).json({ error: err?.message ?? 'Failed to list models' });

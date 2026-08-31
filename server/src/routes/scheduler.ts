@@ -11,6 +11,7 @@ import {
   type ScanFilter,
 } from '../scheduler';
 import { config } from '../config';
+import { metaFor } from '../apiMeta';
 
 const router = Router();
 
@@ -21,7 +22,7 @@ const VALID_FILTERS = new Set<ScanFilter>(['all', 'public', 'live']);
 router.get('/status', async (_req: Request, res: Response) => {
   try {
     const status = await getStatus();
-    res.json(status);
+    res.json({ ...status, meta: metaFor('scheduler.status') });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
 import { AGENCY_ALIASES } from '../data/agencyAliases';
+import { metaFor } from '../apiMeta';
 
 export const agenciesRouter = Router();
 export const bureausRouter = Router();
@@ -60,9 +61,9 @@ agenciesRouter.get('/resolve', async (req: Request, res: Response) => {
     );
 
     if (candidates.length === 1) {
-      res.json({ query: raw, match: candidates[0], candidates: null });
+      res.json({ query: raw, match: candidates[0], candidates: null, meta: metaFor('agencies.resolve') });
     } else {
-      res.json({ query: raw, match: null, candidates });
+      res.json({ query: raw, match: null, candidates, meta: metaFor('agencies.resolve') });
     }
     return;
   }
@@ -81,9 +82,9 @@ agenciesRouter.get('/resolve', async (req: Request, res: Response) => {
   }));
 
   if (dbCandidates.length === 1) {
-    res.json({ query: raw, match: dbCandidates[0], candidates: null });
+    res.json({ query: raw, match: dbCandidates[0], candidates: null, meta: metaFor('agencies.resolve') });
   } else {
-    res.json({ query: raw, match: null, candidates: dbCandidates });
+    res.json({ query: raw, match: null, candidates: dbCandidates, meta: metaFor('agencies.resolve') });
   }
 });
 
@@ -107,7 +108,7 @@ agenciesRouter.get('/', async (req: Request, res: Response) => {
         GROUP BY agency ORDER BY count DESC LIMIT 20
       `);
 
-  res.json(rows.map((r: any) => ({ value: r.agency, count: r.count })));
+  res.json({ data: rows.map((r: any) => ({ value: r.agency, count: r.count })), meta: metaFor('agencies.list') });
 });
 
 /**
@@ -147,5 +148,5 @@ bureausRouter.get('/', async (req: Request, res: Response) => {
         `);
   }
 
-  res.json(rows.map((r: any) => ({ value: r.bureau, count: r.count })));
+  res.json({ data: rows.map((r: any) => ({ value: r.bureau, count: r.count })), meta: metaFor('bureaus.list') });
 });

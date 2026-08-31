@@ -5,6 +5,7 @@ import { PUBLIC_ONLY_CONDITION } from '../utils/publicFilter';
 import { buildColumnFilters } from '../utils/columnFilters';
 import { simplify } from '../utils/simplify';
 import { parsedArray, INTEGER_FIELDS, ARRAY_FIELDS, INTERNAL_FETCH_FIELDS, normalizeSite } from '../utils/normalizeSite';
+import { metaFor } from '../apiMeta';
 
 const router = Router();
 
@@ -257,7 +258,12 @@ router.get('/', async (req: Request, res: Response) => {
     const decision = pickBestMatch(candidates);
 
     if (decision.ambiguous) {
-      sendJson(res, { needs_disambiguation: true, query: q, candidates: decision.candidates });
+      sendJson(res, {
+        needs_disambiguation: true,
+        query: q,
+        candidates: decision.candidates,
+        meta: metaFor('report.get'),
+      });
       return;
     }
 
@@ -408,6 +414,7 @@ router.get('/', async (req: Request, res: Response) => {
       ...(simplifiedMeta ? { simplified: simplifiedMeta } : {}),
       summary,
       sites,
+      meta: metaFor('report.get'),
     });
   } catch (err: any) {
     console.error('[report] GET / error:', err.message, '\n', err.stack);

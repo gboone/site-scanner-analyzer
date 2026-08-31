@@ -20,6 +20,7 @@ import schedulerRouter from './routes/scheduler';
 import agentRouter from './routes/agent';
 import { chatRouter, modelsRouter } from './routes/chat';
 import { setupScheduler, shutdown as shutdownScheduler } from './scheduler';
+import { buildSchemaResponse } from './apiRegistry';
 import { ipAllowlistGate, findMalformedEntries } from './middleware/ipAllowlist';
 import { apiTokenGate } from './middleware/apiToken';
 
@@ -196,79 +197,16 @@ async function main() {
 
   // Health check (legacy — keep for existing clients)
   app.get('/api/v1/health', (_req, res) => {
-    res.json({ ok: true, version: '1.0.0' });
+    res.json({ ok: true, version: buildSchemaResponse().info.version });
   });
 
   // ---------------------------------------------------------------------------
-  // 5. Schema — machine-readable description for Glean agent tool definitions
+  // 5. Schema — machine-readable directory of every mounted API route, driven
+  //    by server/src/apiRegistry.ts (also used for Glean agent tool definitions
+  //    and for the `meta.related` links on individual endpoint responses).
   // ---------------------------------------------------------------------------
   app.get('/api/v1/schema', (_req, res) => {
-    res.json({
-      info: {
-        title: 'Site Scan Analyzer API',
-        description: 'Federal government website scan data. Use /api/v1/report to retrieve public website data for any agency or bureau by name.',
-        version: '1.0.0',
-      },
-      endpoints: {
-        'GET /healthz': {
-          description: 'Liveness check.',
-          response: { status: 'ok' },
-        },
-        'GET /api/v1/report': {
-          description: 'Resolve an agency or bureau name (exact or shorthand) and return its public website data. Returns disambiguation candidates when the query is ambiguous.',
-          parameters: {
-            q: { type: 'string', required: true, description: "Agency or bureau name, exact or partial (e.g. 'HHS', 'NOAA', 'Centers for Medicare and Medicaid Services')" },
-          },
-          responses: {
-            '200_resolved': {
-              needs_disambiguation: false,
-              matched_as: "'agency' | 'bureau'",
-              matched_name: 'string — canonical name as stored in the database',
-              parent_agency: 'string | null — populated when matched_as is bureau',
-              total_public_sites: 'number',
-              summary: {
-                total_public_sites: 'number',
-                live_count: 'number — sites returning HTTP 200',
-                uswds_count: 'number — sites with U.S. Web Design System detected',
-                dap_count: 'number — sites with Digital Analytics Program tag',
-                https_enforced_count: 'number — sites enforcing HTTPS',
-                sitemap_detected_count: 'number — sites with sitemap.xml',
-              },
-              sites: [{
-                domain: 'string',
-                url: 'string | null',
-                title: 'string | null',
-                description: 'string | null',
-                cms: 'string | null — detected content management system',
-                uswds_count: 'number | null — USWDS signal count (higher = more confident)',
-                uswds_version: 'number | null',
-                uswds_semantic_version: 'string | null',
-                dap: '0 | 1 | null',
-                dap_version: 'string | null',
-                https_enforced: '0 | 1 | null',
-                sitemap_xml_detected: '0 | 1 | null',
-                security_header_csp: 'string | null — Content-Security-Policy header value',
-                updated_at: 'string — ISO 8601 timestamp of last scan',
-              }],
-            },
-            '200_disambiguation': {
-              needs_disambiguation: true,
-              query: 'string',
-              candidates: [{
-                type: "'agency' | 'bureau'",
-                name: 'string',
-                parent_agency: 'string | null',
-                site_count: 'number',
-                score: 'number',
-              }],
-            },
-            '400': { error: 'string — validation message' },
-            '404': { error: 'string', query: 'string' },
-            '500': { error: 'string' },
-          },
-        },
-      },
-    });
+    res.json(buildSchemaResponse());
   });
 
   // ---------------------------------------------------------------------------

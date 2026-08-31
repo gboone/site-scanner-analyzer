@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db';
+import { metaFor } from '../apiMeta';
 
 const router = Router();
 
@@ -25,7 +26,7 @@ router.get('/:domain', async (req: Request, res: Response) => {
     'SELECT * FROM briefings WHERE domain = ? ORDER BY created_at DESC',
     [domain]
   );
-  res.json(briefings);
+  res.json({ data: briefings, meta: metaFor('briefings.list') });
 });
 
 // POST /api/v1/briefings - AI briefing generation has been removed

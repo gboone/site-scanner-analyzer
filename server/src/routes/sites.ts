@@ -3,6 +3,7 @@ import { query, execute } from '../db';
 import { PUBLIC_ONLY_CONDITION } from '../utils/publicFilter';
 import { simplify } from '../utils/simplify';
 import { buildColumnFilters } from '../utils/columnFilters';
+import { metaFor } from '../apiMeta';
 
 const router = Router();
 
@@ -134,6 +135,7 @@ router.get('/', async (req: Request, res: Response) => {
           global_null: global_null.join(','),
           global_redundant,
         },
+        meta: metaFor('sites.list'),
       });
       return;
     }
@@ -144,6 +146,7 @@ router.get('/', async (req: Request, res: Response) => {
       page,
       limit,
       pages: Math.ceil(total / limit),
+      meta: metaFor('sites.list'),
     });
   } catch (err: any) {
     console.error('[sites] GET / error:', err.message);
@@ -158,7 +161,7 @@ router.get('/domain-types', async (_req: Request, res: Response) => {
     const rows = await query<{ branch: string }>(
       'SELECT DISTINCT branch FROM sites WHERE branch IS NOT NULL ORDER BY branch'
     );
-    res.json(rows.map(r => r.branch));
+    res.json({ data: rows.map(r => r.branch), meta: metaFor('sites.domainTypes') });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -200,7 +203,7 @@ router.get('/:domain', async (req: Request, res: Response) => {
   );
   const redirect_sources = redirectSourceRows.map((r) => r.domain);
 
-  res.json({ site, scan_history: scanHistory, briefings, redirect_sources });
+  res.json({ site, scan_history: scanHistory, briefings, redirect_sources, meta: metaFor('sites.detail') });
 });
 
 // PUT /api/v1/sites/:domain - update site record

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, execute } from '../db';
+import { metaFor } from '../apiMeta';
 
 const router = Router();
 
@@ -9,7 +10,7 @@ router.get('/', async (_req: Request, res: Response) => {
     const sessions = await query(
       'SELECT * FROM scan_sessions ORDER BY started_at DESC LIMIT 20'
     );
-    res.json(sessions);
+    res.json({ data: sessions, meta: metaFor('scanSessions.list') });
   } catch (err: any) {
     console.error('[scan-sessions] GET error:', err.message);
     res.status(500).json({ error: 'Failed to fetch scan sessions' });
