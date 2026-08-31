@@ -151,6 +151,44 @@ practice, not something this change implements.
   leak is suspected, rotating it immediately is the only remediation.
 - Generate a new token with something like `openssl rand -hex 32`.
 
+## Per-user API keys (added 2026-08-31)
+
+`SCANNER_API_TOKEN` is a single shared secret — nobody can be individually
+cut off without rotating it for every caller at once, and there's no record
+of which caller made which request. Since the underlying data needs no
+confidentiality protection, the gap is attribution and revocation, not
+access control in the traditional sense — full details in
+`docs/plans/2026-08-31-001-feat-per-user-api-keys-plan.md`.
+
+- **Additive, not a replacement.** `apiTokenGate` accepts a valid per-user
+  key (stored hashed in a new `api_keys` table) as an alternative to
+  `SCANNER_API_TOKEN`, which keeps working exactly as before.
+- **Scoped to `GET`, excluding `/settings` and `/api-keys`.** A self-issued
+  key does not get `SCANNER_API_TOKEN`'s full privilege — it can't reach
+  `/query`'s arbitrary SQL, `/settings`' plaintext secrets, or manage other
+  keys. This was added specifically to resolve a privilege-escalation gap
+  found during review: an unscoped self-issued key, mintable by anyone
+  reaching the IP-gated management page with no verification, would
+  otherwise have carried the same blast radius as the shared token.
+- **No email-ownership verification.** A key's `owner_email` is validated
+  only for `@a8c.com`/`@automattic.com` domain shape, not proven ownership.
+  Reaching the IP-gated management page (Settings → API Keys) is the only
+  "proof" required — deliberately lighter than the email-verified
+  credential system this project already built and removed once
+  (`mcp_credentials`, 2026-06-15) for the same underlying reason: nothing in
+  this database needs identity-proofing to be read.
+- **Open visibility and revocation.** Every key is visible to, and
+  revocable by, anyone who reaches the management page — there's no login
+  system to scope "your own keys" against. `created_ip`/`revoked_ip` (from
+  the same `getClientIp()` used elsewhere in this file) are recorded as a
+  corroborating attribution signal for when `owner_email` is wrong or
+  spoofed, but aren't exposed via the API or UI.
+- **Fails closed on DB error.** A per-user key's admission requires a live
+  `api_keys` lookup; any DB error during that lookup 401s rather than
+  falling back to some other admission path. This is a real, accepted
+  availability tradeoff: `SCANNER_API_TOKEN` has no DB dependency, so a
+  transient DB outage only affects per-user-key callers.
+
 ## Rollout preconditions
 
 Before disabling the Dashboard IP Allow List (a separate, manual VIP
